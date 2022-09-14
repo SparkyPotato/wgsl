@@ -1,0 +1,12 @@
+[package]
+name = "wgsl"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+chumsky = "0.8.0"
+half = "2.1.0"
+hexf-parse = "0.2.1"
+lasso = "0.6.0"
+logos = "0.12.1"
