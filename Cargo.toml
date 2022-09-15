@@ -5,8 +5,10 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+aho-corasick = "0.7.19"
 chumsky = "0.8.0"
 half = "2.1.0"
 hexf-parse = "0.2.1"
 lasso = "0.6.0"
 logos = "0.12.1"
+rustc-hash = "1.1.0"

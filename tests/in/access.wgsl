@@ -129,9 +129,9 @@ fn foo_vert(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 	let foo_value = read_from_private(&foo);
 
 	// test array indexing
-	var c = array<i32, 5>(a, i32(b), 3, 4, 5);
-	c[vi + 1u] = 42;
-	let value = c[vi];
+	var d = array<i32, 5>(a, i32(b), 3, 4, 5);
+	d[vi + 1u] = 42;
+	let value = d[vi];
 
 	_ = test_arr_as_arg(array<array<f32, 10>, 5>());
 
@@ -163,7 +163,7 @@ fn atomics() {
 	tmp = atomicMax(&bar.atom, 5);
 	tmp = atomicExchange(&bar.atom, 5);
 	// https://github.com/gpuweb/gpuweb/issues/2021
-	// tmp = atomicCompareExchangeWeak(&bar.atom, 5, 5);
+	// tmp = atomic_compare_exchange_weak(&bar.atom, 5, 5);
 	atomicStore(&bar.atom, value);
 }
 

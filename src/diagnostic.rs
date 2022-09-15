@@ -14,6 +14,7 @@ pub struct Diagnostic {
 	pub message: String,
 	pub span: Span,
 	pub labels: Vec<Label>,
+	pub notes: Vec<String>,
 }
 
 impl Add<Label> for Diagnostic {
@@ -21,6 +22,15 @@ impl Add<Label> for Diagnostic {
 
 	fn add(mut self, other: Label) -> Self::Output {
 		self.labels.push(other);
+		self
+	}
+}
+
+impl<T: ToString> Add<T> for Diagnostic {
+	type Output = Diagnostic;
+
+	fn add(mut self, other: T) -> Self::Output {
+		self.notes.push(other.to_string());
 		self
 	}
 }
@@ -77,6 +87,7 @@ impl Span {
 			message: message.into(),
 			span: *self,
 			labels: Vec::new(),
+			notes: Vec::new(),
 		}
 	}
 
@@ -86,6 +97,7 @@ impl Span {
 			message: message.into(),
 			span: *self,
 			labels: Vec::new(),
+			notes: Vec::new(),
 		}
 	}
 

@@ -1,3 +1,5 @@
+enable storage_image_other_access;
+
 @group(0) @binding(0)
 var image_mipmapped_src: texture_2d<u32>;
 @group(0) @binding(3)
@@ -18,7 +20,6 @@ var image_dst: texture_storage_1d<r32uint,write>;
 @compute @workgroup_size(16)
 fn main(
     @builtin(local_invocation_id) local_id: vec3<u32>,
-    //TODO: https://github.com/gpuweb/gpuweb/issues/1590
     //@builtin(workgroup_size) wg_size: vec3<u32>
 ) {
     let dim = textureDimensions(image_storage_src);

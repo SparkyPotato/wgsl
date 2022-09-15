@@ -1,5 +1,4 @@
 fn blockLexicalScope(a: bool) {
-    let a = 1.0;
     {
         let a = 2;
         {
@@ -11,7 +10,6 @@ fn blockLexicalScope(a: bool) {
 }
 
 fn ifLexicalScope(a: bool) {
-    let a = 1.0;
     if (a == 1.0) {
         let a = true;
     }
@@ -20,7 +18,6 @@ fn ifLexicalScope(a: bool) {
 
 
 fn loopLexicalScope(a: bool) {
-    let a = 1.0;
     loop {
         let a = true;
     }
@@ -28,7 +25,6 @@ fn loopLexicalScope(a: bool) {
 }
 
 fn forLexicalScope(a: f32) {
-    let a = false;
     for (var a = 0; a < 1; a++) {
         let a = 3.0;
     }

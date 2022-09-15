@@ -223,7 +223,7 @@ impl Parser<'_> {
 		let var_decl = choice((
 			var_no_attribs.clone().map(VarDecl::Var),
 			const_.clone().map(VarDecl::Const),
-			let_.map(VarDecl::Let),
+			let_.clone().map(VarDecl::Let),
 		))
 		.map(Box::new);
 
@@ -328,6 +328,7 @@ impl Parser<'_> {
 
 		let unary = select! {
 			TokenKind::And => UnaryOp::Ref,
+			TokenKind::AndAnd => UnaryOp::RefRef,
 			TokenKind::Bang => UnaryOp::Not,
 			TokenKind::Minus => UnaryOp::Minus,
 			TokenKind::Star => UnaryOp::Deref,
@@ -538,7 +539,6 @@ impl Parser<'_> {
 					.allow_trailing()
 					.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace)),
 			)
-			.then_ignore(just(TokenKind::Semicolon).or_not())
 			.map(|(name, fields)| Struct { name, fields })
 			.boxed();
 
@@ -556,6 +556,7 @@ impl Parser<'_> {
 			const_
 				.map(GlobalDeclKind::Const)
 				.then_ignore(just(TokenKind::Semicolon)),
+			let_.map(GlobalDeclKind::Let).then_ignore(just(TokenKind::Semicolon)),
 			static_assert
 				.map(GlobalDeclKind::StaticAssert)
 				.then_ignore(just(TokenKind::Semicolon)),

@@ -1,3 +1,5 @@
+enable push_constant;
+
 struct PushConstants {
     multiplier: f32
 }

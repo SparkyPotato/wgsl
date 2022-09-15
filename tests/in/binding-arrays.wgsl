@@ -1,6 +1,8 @@
+enable binding_array;
+
 struct UniformIndex {
     index: u32
-};
+}
 
 @group(0) @binding(0)
 var texture_array_unbounded: binding_array<texture_2d<f32>>;
@@ -23,7 +25,7 @@ var<uniform> uni: UniformIndex;
 
 struct FragmentIn {
     @location(0) index: u32,
-};
+}
 
 @fragment
 fn main(fragment_in: FragmentIn) -> @location(0) vec4<f32> {

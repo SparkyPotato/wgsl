@@ -1,44 +1,56 @@
-use crate::{diagnostic::Span, text::Text};
+use crate::{
+	ast::{AssignOp, BinaryOp, Ident, Literal, PostfixOp, UnaryOp},
+	diagnostic::Span,
+	resolve::{
+		features::EnabledFeatures,
+		inbuilt::{
+			AccessMode,
+			AddressSpace,
+			AttributeType,
+			DepthTextureType,
+			MatType,
+			PrimitiveType,
+			SampledTextureType,
+			SamplerType,
+			StorageTextureType,
+			TexelFormat,
+			VecType,
+		},
+		inbuilt_functions::InbuiltFunction,
+	},
+};
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+pub struct DeclId(pub u32);
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+pub struct LocalId(pub u32);
 
 #[derive(Clone, Debug, Default)]
 pub struct TranslationUnit {
-	pub enables: Vec<Enable>,
-	pub decls: Vec<GlobalDecl>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Enable {
-	pub name: Ident,
-	pub span: Span,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub struct Ident {
-	pub name: Text,
-	pub span: Span,
+	pub features: EnabledFeatures,
+	pub decls: Vec<Decl>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Attribute {
-	pub name: Ident,
-	pub exprs: Vec<Expr>,
+	pub ty: AttributeType,
 	pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct GlobalDecl {
-	pub kind: GlobalDeclKind,
+pub struct Decl {
+	pub kind: DeclKind,
 	pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum GlobalDeclKind {
+pub enum DeclKind {
 	Fn(Fn),
 	Override(Override),
 	Var(Var),
 	Let(Let),
 	Const(Let),
-	StaticAssert(StaticAssert),
+	StaticAssert(Expr),
 	Struct(Struct),
 	Type(TypeDecl),
 }
@@ -69,16 +81,11 @@ pub struct Var {
 
 #[derive(Clone, Debug)]
 pub struct VarNoAttribs {
-	pub address_space: Option<Ident>,
-	pub access_mode: Option<Ident>,
+	pub address_space: Option<AddressSpace>,
+	pub access_mode: Option<AccessMode>,
 	pub name: Ident,
 	pub ty: Option<Type>,
 	pub val: Option<Expr>,
-}
-
-#[derive(Clone, Debug)]
-pub struct StaticAssert {
-	pub expr: Expr,
 }
 
 #[derive(Clone, Debug)]
@@ -109,8 +116,62 @@ pub struct Type {
 
 #[derive(Clone, Debug)]
 pub enum TypeKind {
-	Ident(Ident, Vec<Type>),
-	Array(Ident, Box<Type>, Option<Expr>),
+	Inbuilt(InbuiltType),
+	User(DeclId),
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+pub enum FloatType {
+	F16,
+	F32,
+	F64,
+	Infer,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+pub enum SampleType {
+	F64,
+	F32,
+	I32,
+	U32,
+}
+
+#[derive(Clone, Debug)]
+pub enum InbuiltType {
+	AbstractInt,
+	AbstractFloat,
+	Primitive(PrimitiveType),
+	Vec {
+		ty: PrimitiveType,
+		comp: VecType,
+	},
+	Mat {
+		ty: FloatType,
+		comp: MatType,
+	},
+	SampledTexture(SampledTextureType, SampleType),
+	DepthTexture(DepthTextureType),
+	StorageTexture(StorageTextureType, TexelFormat, AccessMode),
+	Sampler(SamplerType),
+	Array {
+		of: Box<Type>,
+		len: Option<Expr>,
+	},
+	BindingArray {
+		of: Box<Type>,
+		len: Option<Expr>,
+	},
+	CompareExchangeResult {
+		signed: bool, // Only i32 and u32 are allowed.
+	},
+	Ptr {
+		to: Box<Type>,
+		address_space: AddressSpace,
+		access_mode: AccessMode,
+	},
+	Atomic {
+		signed: bool, // Only i32 and u32 are allowed.
+	},
 }
 
 #[derive(Clone, Debug)]
@@ -126,8 +187,8 @@ pub struct Stmt {
 
 #[derive(Clone, Debug)]
 pub enum StmtKind {
+	Expr(ExprStatementKind),
 	Block(Block),
-	Expr(Expr),
 	Break,
 	Continue,
 	Discard,
@@ -135,19 +196,39 @@ pub enum StmtKind {
 	If(If),
 	Loop(Block),
 	Return(Option<Expr>),
-	StaticAssert(StaticAssert),
+	StaticAssert(Expr),
 	Switch(Switch),
 	While(While),
 	Continuing(Block),
 	BreakIf(Expr),
-	Empty,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExprStatement {
+	pub kind: ExprStatementKind,
+	pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum ExprStatementKind {
+	VarDecl(VarDecl),
+	Call(CallExpr),
+	IgnoreExpr(Expr),
+	Assign(AssignExpr),
+	Postfix(PostfixExpr),
+}
+
+#[derive(Clone, Debug)]
+pub struct CallStmt {
+	pub name: Ident,
+	pub args: Vec<Expr>,
 }
 
 #[derive(Clone, Debug)]
 pub struct For {
-	pub init: Option<Expr>,
+	pub init: Option<ExprStatement>,
 	pub cond: Option<Expr>,
-	pub update: Option<Expr>,
+	pub update: Option<ExprStatement>, // var decls are not allowed here.
 	pub block: Block,
 }
 
@@ -191,51 +272,21 @@ pub struct Expr {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
-	Underscore,
-	VarDecl(Box<VarDecl>),
+	Error,
 	Literal(Literal),
-	Ident(IdentExpr),
+	Local(LocalId),
+	Global(DeclId),
 	Unary(UnaryExpr),
 	Binary(BinaryExpr),
-	Assign(AssignExpr),
 	Call(CallExpr),
 	Index(Box<Expr>, Box<Expr>),
 	Member(Box<Expr>, Ident),
-	Postfix(PostfixExpr),
-}
-
-#[derive(Clone, Debug)]
-pub struct IdentExpr {
-	pub name: Ident,
-	pub generics: Vec<Type>,
-	pub array_len: Option<Box<Expr>>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Literal {
-	Bool(bool),
-	AbstractInt(i64),
-	AbstractFloat(f64),
-	I32(i32),
-	U32(u32),
-	F32(f32),
-	F16(half::f16),
 }
 
 #[derive(Clone, Debug)]
 pub struct UnaryExpr {
 	pub op: UnaryOp,
 	pub expr: Box<Expr>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum UnaryOp {
-	Ref,
-	RefRef,
-	Not,
-	Minus,
-	Deref,
-	BitNot,
 }
 
 #[derive(Clone, Debug)]
@@ -245,25 +296,18 @@ pub struct AssignExpr {
 	pub rhs: Box<Expr>,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum AssignOp {
-	Assign,
-	Add,
-	Sub,
-	Mul,
-	Div,
-	Mod,
-	BitAnd,
-	BitOr,
-	BitXor,
-	ShiftLeft,
-	ShiftRight,
+#[derive(Clone, Debug)]
+pub struct CallExpr {
+	pub target: FnTarget,
+	pub args: Vec<Expr>,
 }
 
 #[derive(Clone, Debug)]
-pub struct CallExpr {
-	pub target: Box<Expr>,
-	pub args: Vec<Expr>,
+pub enum FnTarget {
+	Decl(DeclId),
+	InbuiltFunction(InbuiltFunction),
+	InbuiltType(Box<InbuiltType>),
+	Error,
 }
 
 #[derive(Clone, Debug)]
@@ -273,42 +317,20 @@ pub struct BinaryExpr {
 	pub rhs: Box<Expr>,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum BinaryOp {
-	Add,
-	Sub,
-	Mul,
-	Div,
-	Mod,
-	BitAnd,
-	BitOr,
-	BitXor,
-	BitShiftLeft,
-	BitShiftRight,
-	Equal,
-	NotEqual,
-	LessThan,
-	LessThanEqual,
-	GreaterThan,
-	GreaterThanEqual,
-	And,
-	Or,
-}
-
 #[derive(Clone, Debug)]
 pub struct PostfixExpr {
 	pub expr: Box<Expr>,
 	pub op: PostfixOp,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum PostfixOp {
-	Increment,
-	Decrement,
+#[derive(Clone, Debug)]
+pub struct VarDecl {
+	pub kind: VarDeclKind,
+	pub local: LocalId,
 }
 
 #[derive(Clone, Debug)]
-pub enum VarDecl {
+pub enum VarDeclKind {
 	Var(VarNoAttribs),
 	Const(Let),
 	Let(Let),

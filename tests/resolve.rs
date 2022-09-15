@@ -1,13 +1,18 @@
 use wgsl::{
 	diagnostic::{Diagnostics, Span},
 	parse::parse,
+	resolve::resolve,
 	text::Interner,
 };
 
 fn test(source: &str, file: &str, intern: &mut Interner) {
 	let mut diagnostics = Diagnostics::new();
+	let tu = parse(intern, &mut diagnostics, source, file);
+	assert!(!diagnostics.had_error());
 
-	let _ = parse(intern, &mut diagnostics, source, file);
+	// panic!("{:#?}", tu);
+
+	let _ = resolve(tu, intern, &mut diagnostics);
 
 	if diagnostics.had_error() {
 		for diag in diagnostics.diags() {
@@ -21,7 +26,7 @@ fn test(source: &str, file: &str, intern: &mut Interner) {
 			);
 		}
 
-		panic!("failed to parse file '{}'", file);
+		panic!("failed to resolve file '{}'", file);
 	}
 }
 
