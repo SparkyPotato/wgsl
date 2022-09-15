@@ -12,3 +12,4 @@ hexf-parse = "0.2.1"
 lasso = "0.6.0"
 logos = "0.12.1"
 rustc-hash = "1.1.0"
+strum = { version = "0.24.1", features = ["derive"] }

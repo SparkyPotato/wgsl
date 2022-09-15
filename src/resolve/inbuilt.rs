@@ -1,27 +1,40 @@
 use std::fmt::Display;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
+use rustc_hash::FxHashMap;
+use strum::{EnumIter, IntoEnumIterator};
 
-use crate::ast::Expr;
+use crate::{
+	ast::Expr,
+	text::{Interner, Text},
+};
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+pub trait ToStaticString {
+	fn to_static_str(&self) -> &'static str;
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum AccessMode {
 	Read,
 	Write,
 	ReadWrite,
 }
 
-impl Display for AccessMode {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for AccessMode {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			AccessMode::Read => write!(f, "read"),
-			AccessMode::Write => write!(f, "write"),
-			AccessMode::ReadWrite => write!(f, "read_write"),
+			AccessMode::Read => "read",
+			AccessMode::Write => "write",
+			AccessMode::ReadWrite => "readwrite",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for AccessMode {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum AddressSpace {
 	Function,
 	Private,
@@ -31,17 +44,21 @@ pub enum AddressSpace {
 	PushConstant,
 }
 
-impl Display for AddressSpace {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for AddressSpace {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			AddressSpace::Function => write!(f, "function"),
-			AddressSpace::Private => write!(f, "private"),
-			AddressSpace::Storage => write!(f, "storage"),
-			AddressSpace::Uniform => write!(f, "uniform"),
-			AddressSpace::Workgroup => write!(f, "workgroup"),
-			AddressSpace::PushConstant => write!(f, "push_constant"),
+			AddressSpace::Function => "function",
+			AddressSpace::Private => "private",
+			AddressSpace::Storage => "storage",
+			AddressSpace::Uniform => "uniform",
+			AddressSpace::Workgroup => "workgroup",
+			AddressSpace::PushConstant => "push_constant",
 		}
 	}
+}
+
+impl Display for AddressSpace {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
 }
 
 #[derive(Clone, Debug)]
@@ -83,7 +100,7 @@ impl Display for AttributeType {
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum Builtin {
 	FragDepth,
 	FrontFacing,
@@ -101,62 +118,74 @@ pub enum Builtin {
 	ViewIndex,
 }
 
-impl Display for Builtin {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for Builtin {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			Builtin::FragDepth => write!(f, "frag_depth"),
-			Builtin::FrontFacing => write!(f, "front_facing"),
-			Builtin::GlobalInvocationId => write!(f, "global_invocation_id"),
-			Builtin::InstanceIndex => write!(f, "instance_index"),
-			Builtin::LocalInvocationId => write!(f, "local_invocation_id"),
-			Builtin::LocalInvocationIndex => write!(f, "local_invocation_index"),
-			Builtin::NumWorkgroups => write!(f, "num_workgroups"),
-			Builtin::Position => write!(f, "position"),
-			Builtin::SampleIndex => write!(f, "sample_index"),
-			Builtin::SampleMask => write!(f, "sample_mask"),
-			Builtin::VertexIndex => write!(f, "vertex_index"),
-			Builtin::WorkgroupId => write!(f, "workgroup_id"),
-			Builtin::PrimitiveIndex => write!(f, "primitive_index"),
-			Builtin::ViewIndex => write!(f, "view_index"),
+			Builtin::FragDepth => "frag_depth",
+			Builtin::FrontFacing => "front_facing",
+			Builtin::GlobalInvocationId => "global_invocation_id",
+			Builtin::InstanceIndex => "instance_index",
+			Builtin::LocalInvocationId => "local_invocation_id",
+			Builtin::LocalInvocationIndex => "local_invocation_index",
+			Builtin::NumWorkgroups => "num_workgroups",
+			Builtin::Position => "position",
+			Builtin::SampleIndex => "sample_index",
+			Builtin::SampleMask => "sample_mask",
+			Builtin::VertexIndex => "vertex_index",
+			Builtin::WorkgroupId => "workgroup_id",
+			Builtin::PrimitiveIndex => "primitive_index",
+			Builtin::ViewIndex => "view_index",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for Builtin {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum InterpolationSample {
 	Center,
 	Centroid,
 	Sample,
 }
 
-impl Display for InterpolationSample {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for InterpolationSample {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			InterpolationSample::Center => write!(f, "center"),
-			InterpolationSample::Centroid => write!(f, "centroid"),
-			InterpolationSample::Sample => write!(f, "sample"),
+			InterpolationSample::Center => "center",
+			InterpolationSample::Centroid => "centroid",
+			InterpolationSample::Sample => "sample",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for InterpolationSample {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum InterpolationType {
 	Flat,
 	Linear,
 	Perspective,
 }
 
-impl Display for InterpolationType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for InterpolationType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			InterpolationType::Flat => write!(f, "flat"),
-			InterpolationType::Linear => write!(f, "linear"),
-			InterpolationType::Perspective => write!(f, "perspective"),
+			InterpolationType::Flat => "flat",
+			InterpolationType::Linear => "linear",
+			InterpolationType::Perspective => "perspective",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for InterpolationType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum PrimitiveType {
 	I32,
 	U32,
@@ -167,38 +196,46 @@ pub enum PrimitiveType {
 	Infer,
 }
 
-impl Display for PrimitiveType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for PrimitiveType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			PrimitiveType::I32 => write!(f, "i32"),
-			PrimitiveType::U32 => write!(f, "u32"),
-			PrimitiveType::F64 => write!(f, "f64"),
-			PrimitiveType::F32 => write!(f, "f32"),
-			PrimitiveType::F16 => write!(f, "f16"),
-			PrimitiveType::Bool => write!(f, "bool"),
-			PrimitiveType::Infer => write!(f, "_"),
+			PrimitiveType::I32 => "i32",
+			PrimitiveType::U32 => "u32",
+			PrimitiveType::F64 => "f64",
+			PrimitiveType::F32 => "f32",
+			PrimitiveType::F16 => "f16",
+			PrimitiveType::Bool => "bool",
+			PrimitiveType::Infer => "_",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for PrimitiveType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum VecType {
 	Vec2,
 	Vec3,
 	Vec4,
 }
 
-impl Display for VecType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for VecType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			VecType::Vec2 => write!(f, "vec2"),
-			VecType::Vec3 => write!(f, "vec3"),
-			VecType::Vec4 => write!(f, "vec4"),
+			VecType::Vec2 => "vec2",
+			VecType::Vec3 => "vec3",
+			VecType::Vec4 => "vec4",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for VecType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum MatType {
 	Mat2x2,
 	Mat2x3,
@@ -211,23 +248,27 @@ pub enum MatType {
 	Mat4x4,
 }
 
-impl Display for MatType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for MatType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			MatType::Mat2x2 => write!(f, "mat2x2"),
-			MatType::Mat2x3 => write!(f, "mat2x3"),
-			MatType::Mat2x4 => write!(f, "mat2x4"),
-			MatType::Mat3x2 => write!(f, "mat3x2"),
-			MatType::Mat3x3 => write!(f, "mat3x3"),
-			MatType::Mat3x4 => write!(f, "mat3x4"),
-			MatType::Mat4x2 => write!(f, "mat4x2"),
-			MatType::Mat4x3 => write!(f, "mat4x3"),
-			MatType::Mat4x4 => write!(f, "mat4x4"),
+			MatType::Mat2x2 => "mat2x2",
+			MatType::Mat2x3 => "mat2x3",
+			MatType::Mat2x4 => "mat2x4",
+			MatType::Mat3x2 => "mat3x2",
+			MatType::Mat3x3 => "mat3x3",
+			MatType::Mat3x4 => "mat3x4",
+			MatType::Mat4x2 => "mat4x2",
+			MatType::Mat4x3 => "mat4x3",
+			MatType::Mat4x4 => "mat4x4",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for MatType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum SampledTextureType {
 	Texture1d,
 	Texture1dArray,
@@ -239,22 +280,26 @@ pub enum SampledTextureType {
 	TextureCubeArray,
 }
 
-impl Display for SampledTextureType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for SampledTextureType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			SampledTextureType::Texture1d => write!(f, "texture_1d"),
-			SampledTextureType::Texture1dArray => write!(f, "texture_1d_array"),
-			SampledTextureType::Texture2d => write!(f, "texture_2d"),
-			SampledTextureType::TextureMultisampled2d => write!(f, "texture_multisampled_2d"),
-			SampledTextureType::Texture2dArray => write!(f, "texture_2d_array"),
-			SampledTextureType::Texture3d => write!(f, "texture_3d"),
-			SampledTextureType::TextureCube => write!(f, "texture_cube"),
-			SampledTextureType::TextureCubeArray => write!(f, "texture_cube_array"),
+			SampledTextureType::Texture1d => "texture_1d",
+			SampledTextureType::Texture1dArray => "texture_1d_array",
+			SampledTextureType::Texture2d => "texture_2d",
+			SampledTextureType::TextureMultisampled2d => "texture_multisampled_2d",
+			SampledTextureType::Texture2dArray => "texture_2d_array",
+			SampledTextureType::Texture3d => "texture_3d",
+			SampledTextureType::TextureCube => "texture_cube",
+			SampledTextureType::TextureCubeArray => "texture_cube_array",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for SampledTextureType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum DepthTextureType {
 	Depth2d,
 	Depth2dArray,
@@ -263,34 +308,42 @@ pub enum DepthTextureType {
 	DepthMultisampled2d,
 }
 
-impl Display for DepthTextureType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for DepthTextureType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			DepthTextureType::Depth2d => write!(f, "texture_depth_2d"),
-			DepthTextureType::Depth2dArray => write!(f, "texture_depth_2d_array"),
-			DepthTextureType::DepthCube => write!(f, "texture_depth_cube"),
-			DepthTextureType::DepthCubeArray => write!(f, "texture_depth_cube_array"),
-			DepthTextureType::DepthMultisampled2d => write!(f, "texture_depth_multisampled_2d"),
+			DepthTextureType::Depth2d => "texture_depth_2d",
+			DepthTextureType::Depth2dArray => "texture_depth_2d_array",
+			DepthTextureType::DepthCube => "texture_depth_cube",
+			DepthTextureType::DepthCubeArray => "texture_depth_cube_array",
+			DepthTextureType::DepthMultisampled2d => "texture_depth_multisampled_2d",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for DepthTextureType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum SamplerType {
 	Sampler,
 	SamplerComparison,
 }
 
-impl Display for SamplerType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for SamplerType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			SamplerType::Sampler => write!(f, "sampler"),
-			SamplerType::SamplerComparison => write!(f, "sampler_comparison"),
+			SamplerType::Sampler => "sampler",
+			SamplerType::SamplerComparison => "sampler_comparison",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for SamplerType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum StorageTextureType {
 	Storage1d,
 	Storage1dArray,
@@ -299,19 +352,23 @@ pub enum StorageTextureType {
 	Storage3d,
 }
 
-impl Display for StorageTextureType {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for StorageTextureType {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			StorageTextureType::Storage1d => write!(f, "storage_1d"),
-			StorageTextureType::Storage1dArray => write!(f, "storage_1d_array"),
-			StorageTextureType::Storage2d => write!(f, "storage_2d"),
-			StorageTextureType::Storage2dArray => write!(f, "storage_2d_array"),
-			StorageTextureType::Storage3d => write!(f, "storage_3d"),
+			StorageTextureType::Storage1d => "texture_storage_1d",
+			StorageTextureType::Storage1dArray => "texture_storage_1d_array",
+			StorageTextureType::Storage2d => "texture_storage_2d",
+			StorageTextureType::Storage2dArray => "texture_storage_2d_array",
+			StorageTextureType::Storage3d => "texture_storage_3d",
 		}
 	}
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+impl Display for StorageTextureType {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
 pub enum TexelFormat {
 	R32Float,
 	R32Sint,
@@ -331,27 +388,49 @@ pub enum TexelFormat {
 	Rgba8Snorm,
 }
 
-impl Display for TexelFormat {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl ToStaticString for TexelFormat {
+	fn to_static_str(&self) -> &'static str {
 		match self {
-			TexelFormat::R32Float => write!(f, "r32float"),
-			TexelFormat::R32Sint => write!(f, "r32sint"),
-			TexelFormat::R32Uint => write!(f, "r32uint"),
-			TexelFormat::Rg32Float => write!(f, "rg32float"),
-			TexelFormat::Rg32Sint => write!(f, "rg32sint"),
-			TexelFormat::Rg32Uint => write!(f, "rg32uint"),
-			TexelFormat::Rgba16Float => write!(f, "rgba16float"),
-			TexelFormat::Rgba16Sint => write!(f, "rgba16sint"),
-			TexelFormat::Rgba16Uint => write!(f, "rgba16uint"),
-			TexelFormat::Rgba32Float => write!(f, "rgba32float"),
-			TexelFormat::Rgba32Sint => write!(f, "rgba32sint"),
-			TexelFormat::Rgba32Uint => write!(f, "rgba32uint"),
-			TexelFormat::Rgba8Sint => write!(f, "rgba8sint"),
-			TexelFormat::Rgba8Uint => write!(f, "rgba8uint"),
-			TexelFormat::Rgba8Unorm => write!(f, "rgba8unorm"),
-			TexelFormat::Rgba8Snorm => write!(f, "rgba8snorm"),
+			TexelFormat::R32Float => "r32float",
+			TexelFormat::R32Sint => "r32sint",
+			TexelFormat::R32Uint => "r32uint",
+			TexelFormat::Rg32Float => "rg32float",
+			TexelFormat::Rg32Sint => "rg32sint",
+			TexelFormat::Rg32Uint => "rg32uint",
+			TexelFormat::Rgba16Float => "rgba16float",
+			TexelFormat::Rgba16Sint => "rgba16sint",
+			TexelFormat::Rgba16Uint => "rgba16uint",
+			TexelFormat::Rgba32Float => "rgba32float",
+			TexelFormat::Rgba32Sint => "rgba32sint",
+			TexelFormat::Rgba32Uint => "rgba32uint",
+			TexelFormat::Rgba8Sint => "rgba8sint",
+			TexelFormat::Rgba8Uint => "rgba8uint",
+			TexelFormat::Rgba8Unorm => "rgba8unorm",
+			TexelFormat::Rgba8Snorm => "rgba8snorm",
 		}
 	}
+}
+
+impl Display for TexelFormat {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+pub struct Matcher<T> {
+	map: FxHashMap<Text, T>,
+}
+
+impl<T: ToStaticString + IntoEnumIterator + Copy> Matcher<T> {
+	pub fn new(intern: &mut Interner) -> Self {
+		let mut map = FxHashMap::default();
+
+		for variant in T::iter() {
+			map.insert(intern.get_static(variant.to_static_str()), variant);
+		}
+
+		Self { map }
+	}
+
+	pub fn get(&self, text: Text) -> Option<T> { self.map.get(&text).copied() }
 }
 
 pub fn reserved_words_and_keywords() -> &'static [&'static str] {
