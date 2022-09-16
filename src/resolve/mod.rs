@@ -1,5 +1,5 @@
 use aho_corasick::AhoCorasick;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
 	ast,
@@ -28,11 +28,12 @@ use crate::{
 		},
 		inbuilt_functions::InbuiltFunction,
 		index::Index,
-		ir::{FloatType, FnTarget, InbuiltType, LocalId, SampleType},
+		ir::{DeclDependency, DeclDependencyKind, DeclId, FloatType, FnTarget, InbuiltType, LocalId, SampleType},
 	},
 	text::{Interner, Text},
 };
 
+mod cycle;
 mod features;
 mod inbuilt;
 mod inbuilt_functions;
@@ -74,11 +75,14 @@ pub fn resolve(tu: ast::TranslationUnit, intern: &mut Interner, diagnostics: &mu
 		in_continuing: false,
 		in_function: false,
 		scopes: Vec::new(),
+		dependencies: FxHashSet::default(),
 	};
 
 	for decl in tu.decls {
 		resolver.decl(decl);
 	}
+
+	cycle::resolve_all_dependencies(&mut out, diagnostics);
 
 	out
 }
@@ -108,7 +112,8 @@ struct Resolver<'a> {
 	in_loop: bool,
 	in_continuing: bool,
 	in_function: bool,
-	scopes: Vec<FxHashMap<Text, (LocalId, Span)>>,
+	scopes: Vec<FxHashMap<Text, (LocalId, Span, bool)>>,
+	dependencies: FxHashSet<DeclDependency>,
 }
 
 impl<'a> Resolver<'a> {
@@ -116,7 +121,15 @@ impl<'a> Resolver<'a> {
 		self.locals = 0;
 
 		let kind = match decl.kind {
-			GlobalDeclKind::Fn(f) => ir::DeclKind::Fn(self.fn_(f)),
+			GlobalDeclKind::Fn(f) => {
+				let f = self.fn_(f);
+
+				if !matches!(f.attribs, ir::FnAttribs::None) {
+					self.tu.roots.push(DeclId(self.tu.decls.len() as _));
+				}
+
+				ir::DeclKind::Fn(f)
+			},
 			GlobalDeclKind::Override(ov) => ir::DeclKind::Override(self.ov(ov)),
 			GlobalDeclKind::Var(v) => ir::DeclKind::Var(ir::Var {
 				attribs: self.var_attribs(v.attribs),
@@ -141,7 +154,11 @@ impl<'a> Resolver<'a> {
 			},
 		};
 
-		let decl = ir::Decl { kind, span: decl.span };
+		let decl = ir::Decl {
+			kind,
+			span: decl.span,
+			dependencies: std::mem::take(&mut self.dependencies),
+		};
 
 		self.tu.decls.push(decl);
 	}
@@ -154,7 +171,7 @@ impl<'a> Resolver<'a> {
 		self.scopes.push(FxHashMap::default());
 		let args = fn_.args.into_iter().map(|x| self.arg(x)).collect();
 		let block = self.block_inner(fn_.block);
-		self.scopes.pop();
+		self.pop_scope();
 
 		self.in_function = false;
 
@@ -204,8 +221,8 @@ impl<'a> Resolver<'a> {
 		let args = self.scopes.last_mut().expect("no scope");
 		let id = LocalId(self.locals);
 		self.locals += 1;
-		let old = args.insert(arg.name.name, (id, arg.span));
-		if let Some((_, span)) = old {
+		let old = args.insert(arg.name.name, (id, arg.span, false));
+		if let Some((_, span, _)) = old {
 			self.diagnostics.push(
 				arg.name.span.error("duplicate argument name")
 					+ arg.name.span.label("redeclared here")
@@ -550,6 +567,10 @@ impl<'a> Resolver<'a> {
 			}
 
 			if let Some(user) = self.index.get(ident.name) {
+				self.dependencies.insert(DeclDependency {
+					kind: DeclDependencyKind::Decl(user),
+					usage: ident.span,
+				});
 				ir::TypeKind::User(user)
 			} else {
 				self.diagnostics
@@ -564,7 +585,7 @@ impl<'a> Resolver<'a> {
 	fn block(&mut self, block: ast::Block) -> ir::Block {
 		self.scopes.push(FxHashMap::default());
 		let ret = self.block_inner(block);
-		self.scopes.pop();
+		self.pop_scope();
 		ret
 	}
 
@@ -614,7 +635,7 @@ impl<'a> Resolver<'a> {
 					}
 				});
 				let block = self.block_inner(for_.block);
-				self.scopes.pop();
+				self.pop_scope();
 
 				ir::StmtKind::For(ir::For {
 					init,
@@ -774,9 +795,9 @@ impl<'a> Resolver<'a> {
 							.scopes
 							.last_mut()
 							.expect("no scopes")
-							.insert(name.name, (id, name.span));
+							.insert(name.name, (id, name.span, false));
 
-						if let Some((_, span)) = old {
+						if let Some((_, span, _)) = old {
 							self.diagnostics.push(
 								name.span.error("shadowing is not allowed in the same scope")
 									+ span.label("previously declared here")
@@ -856,10 +877,18 @@ impl<'a> Resolver<'a> {
 				let name = ident.name;
 
 				if let Some(decl) = self.index.get(name.name) {
+					self.dependencies.insert(DeclDependency {
+						kind: DeclDependencyKind::Decl(decl),
+						usage: name.span,
+					});
 					FnTarget::Decl(decl)
 				} else if let Some(ty) = self.constructible_inbuilt(ident) {
 					FnTarget::InbuiltType(Box::new(ty))
 				} else if let Some(inbuilt) = self.inbuilt_function.get(name.name) {
+					self.dependencies.insert(DeclDependency {
+						kind: DeclDependencyKind::Inbuilt(inbuilt),
+						usage: name.span,
+					});
 					FnTarget::InbuiltFunction(inbuilt)
 				} else {
 					self.diagnostics
@@ -1478,18 +1507,32 @@ impl<'a> Resolver<'a> {
 	}
 
 	fn resolve_access(&mut self, ident: Ident) -> ir::ExprKind {
-		for scope in self.scopes.iter().rev() {
-			if let Some((id, _)) = scope.get(&ident.name) {
+		for scope in self.scopes.iter_mut().rev() {
+			if let Some((id, _, used)) = scope.get_mut(&ident.name) {
+				*used = true;
 				return ir::ExprKind::Local(*id);
 			}
 		}
 
 		if let Some(global) = self.index.get(ident.name) {
+			self.dependencies.insert(DeclDependency {
+				kind: DeclDependencyKind::Decl(global),
+				usage: ident.span,
+			});
 			ir::ExprKind::Global(global)
 		} else {
 			self.diagnostics
 				.push(ident.span.error("undefined identifier") + ident.span.marker());
 			ir::ExprKind::Error
+		}
+	}
+
+	fn pop_scope(&mut self) {
+		let scope = self.scopes.pop().unwrap();
+		for (_, (_, span, used)) in scope {
+			if !used {
+				self.diagnostics.push(span.warning("unused variable") + span.marker());
+			}
 		}
 	}
 }

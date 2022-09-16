@@ -1,3 +1,7 @@
+use std::hash::Hash;
+
+use rustc_hash::FxHashSet;
+
 use crate::{
 	ast::{AssignOp, BinaryOp, Ident, Literal, PostfixOp, UnaryOp},
 	diagnostic::Span,
@@ -32,6 +36,7 @@ pub struct LocalId(pub u32);
 pub struct TranslationUnit {
 	pub features: EnabledFeatures,
 	pub decls: Vec<Decl>,
+	pub roots: Vec<DeclId>,
 }
 
 impl TranslationUnit {
@@ -39,6 +44,7 @@ impl TranslationUnit {
 		Self {
 			features,
 			decls: Vec::new(),
+			roots: Vec::new(),
 		}
 	}
 }
@@ -49,9 +55,32 @@ pub struct Attribute {
 	pub span: Span,
 }
 
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+pub enum DeclDependencyKind {
+	Decl(DeclId),
+	Inbuilt(InbuiltFunction),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct DeclDependency {
+	pub kind: DeclDependencyKind,
+	pub usage: Span,
+}
+
+impl Hash for DeclDependency {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.kind.hash(state); }
+}
+
+impl PartialEq for DeclDependency {
+	fn eq(&self, other: &Self) -> bool { self.kind == other.kind }
+}
+
+impl Eq for DeclDependency {}
+
 #[derive(Clone, Debug)]
 pub struct Decl {
 	pub kind: DeclKind,
+	pub dependencies: FxHashSet<DeclDependency>,
 	pub span: Span,
 }
 

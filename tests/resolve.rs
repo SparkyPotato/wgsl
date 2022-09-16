@@ -10,20 +10,22 @@ fn test(source: &str, file: &str, intern: &mut Interner) {
 	let tu = parse(intern, &mut diagnostics, source, file);
 	assert!(!diagnostics.had_error());
 
-	// panic!("{:#?}", tu);
-
 	let _ = resolve(tu, intern, &mut diagnostics);
 
 	if diagnostics.had_error() {
 		for diag in diagnostics.diags() {
 			let (line, column) = span_to_line_column(source, diag.span);
-			println!(
-				"{} at {}:{} (`{}`)",
-				diag.message,
-				line,
-				column,
-				&source[diag.span.start as usize..diag.span.end as usize]
-			);
+			println!("{} at {}:{}:", diag.message, line, column,);
+			for label in diag.labels.iter() {
+				let (line, column) = span_to_line_column(source, label.span);
+				println!(
+					"{} at {}:{} (`{}`)",
+					label.message,
+					line,
+					column,
+					&source[label.span.start as usize..label.span.end as usize]
+				);
+			}
 		}
 
 		panic!("failed to resolve file '{}'", file);
