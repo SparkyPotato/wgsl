@@ -25,7 +25,7 @@ impl ToStaticString for AccessMode {
 		match self {
 			AccessMode::Read => "read",
 			AccessMode::Write => "write",
-			AccessMode::ReadWrite => "readwrite",
+			AccessMode::ReadWrite => "read_write",
 		}
 	}
 }
@@ -41,6 +41,7 @@ pub enum AddressSpace {
 	Storage,
 	Uniform,
 	Workgroup,
+	Handle,
 	PushConstant,
 }
 
@@ -52,6 +53,7 @@ impl ToStaticString for AddressSpace {
 			AddressSpace::Storage => "storage",
 			AddressSpace::Uniform => "uniform",
 			AddressSpace::Workgroup => "workgroup",
+			AddressSpace::Handle => "handle",
 			AddressSpace::PushConstant => "push_constant",
 		}
 	}
@@ -415,6 +417,7 @@ impl Display for TexelFormat {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
 }
 
+#[derive(Clone)]
 pub struct Matcher<T> {
 	map: FxHashMap<Text, T>,
 }

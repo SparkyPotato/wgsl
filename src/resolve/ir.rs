@@ -7,7 +7,10 @@ use crate::{
 			AccessMode,
 			AddressSpace,
 			AttributeType,
+			Builtin,
 			DepthTextureType,
+			InterpolationSample,
+			InterpolationType,
 			MatType,
 			PrimitiveType,
 			SampledTextureType,
@@ -25,10 +28,19 @@ pub struct DeclId(pub u32);
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub struct LocalId(pub u32);
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TranslationUnit {
 	pub features: EnabledFeatures,
 	pub decls: Vec<Decl>,
+}
+
+impl TranslationUnit {
+	pub fn new(features: EnabledFeatures) -> Self {
+		Self {
+			features,
+			decls: Vec::new(),
+		}
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -48,7 +60,6 @@ pub enum DeclKind {
 	Fn(Fn),
 	Override(Override),
 	Var(Var),
-	Let(Let),
 	Const(Let),
 	StaticAssert(Expr),
 	Struct(Struct),
@@ -57,17 +68,42 @@ pub enum DeclKind {
 
 #[derive(Clone, Debug)]
 pub struct Fn {
-	pub attribs: Vec<Attribute>,
+	pub attribs: FnAttribs,
 	pub name: Ident,
 	pub args: Vec<Arg>,
-	pub ret_attribs: Vec<Attribute>,
+	pub ret_attribs: ArgAttribs,
 	pub ret: Option<Type>,
 	pub block: Block,
 }
 
 #[derive(Clone, Debug)]
+pub enum FnAttribs {
+	None,
+	Vertex,
+	Fragment,
+	Compute(Option<Expr>, Option<Expr>, Option<Expr>),
+}
+
+#[derive(Clone, Debug)]
+pub struct Arg {
+	pub attribs: ArgAttribs,
+	pub name: Ident,
+	pub ty: Type,
+	pub span: Span,
+	pub id: LocalId,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArgAttribs {
+	pub builtin: Option<Builtin>,
+	pub location: Option<Expr>,
+	pub interpolate: Option<(InterpolationType, InterpolationSample)>,
+	pub invariant: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct Override {
-	pub attribs: Vec<Attribute>,
+	pub id: Option<Expr>,
 	pub name: Ident,
 	pub ty: Option<Type>,
 	pub val: Option<Expr>,
@@ -75,14 +111,20 @@ pub struct Override {
 
 #[derive(Clone, Debug)]
 pub struct Var {
-	pub attribs: Vec<Attribute>,
+	pub attribs: VarAttribs,
 	pub inner: VarNoAttribs,
 }
 
 #[derive(Clone, Debug)]
+pub struct VarAttribs {
+	pub group: Option<Expr>,
+	pub binding: Option<Expr>,
+}
+
+#[derive(Clone, Debug)]
 pub struct VarNoAttribs {
-	pub address_space: Option<AddressSpace>,
-	pub access_mode: Option<AccessMode>,
+	pub address_space: AddressSpace,
+	pub access_mode: AccessMode,
 	pub name: Ident,
 	pub ty: Option<Type>,
 	pub val: Option<Expr>,
@@ -91,21 +133,30 @@ pub struct VarNoAttribs {
 #[derive(Clone, Debug)]
 pub struct Struct {
 	pub name: Ident,
-	pub fields: Vec<Arg>,
+	pub fields: Vec<Field>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Field {
+	pub attribs: FieldAttribs,
+	pub name: Ident,
+	pub ty: Type,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldAttribs {
+	pub align: Option<Expr>,
+	pub builtin: Option<Builtin>,
+	pub location: Option<Expr>,
+	pub interpolate: Option<(InterpolationType, InterpolationSample)>,
+	pub invariant: bool,
+	pub size: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TypeDecl {
 	pub name: Ident,
 	pub ty: Type,
-}
-
-#[derive(Clone, Debug)]
-pub struct Arg {
-	pub attribs: Vec<Attribute>,
-	pub name: Ident,
-	pub ty: Type,
-	pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -213,7 +264,6 @@ pub struct ExprStatement {
 pub enum ExprStatementKind {
 	VarDecl(VarDecl),
 	Call(CallExpr),
-	IgnoreExpr(Expr),
 	Assign(AssignExpr),
 	Postfix(PostfixExpr),
 }
@@ -291,7 +341,7 @@ pub struct UnaryExpr {
 
 #[derive(Clone, Debug)]
 pub struct AssignExpr {
-	pub lhs: Box<Expr>,
+	pub lhs: Box<AssignTarget>,
 	pub op: AssignOp,
 	pub rhs: Box<Expr>,
 }
@@ -300,6 +350,22 @@ pub struct AssignExpr {
 pub struct CallExpr {
 	pub target: FnTarget,
 	pub args: Vec<Expr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AssignTarget {
+	pub kind: AssignTargetKind,
+	pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum AssignTargetKind {
+	Ignore,
+	Local(LocalId),
+	Global(DeclId),
+	Index(Box<Expr>, Box<Expr>),
+	Member(Box<Expr>, Ident),
+	Deref(Box<Expr>),
 }
 
 #[derive(Clone, Debug)]

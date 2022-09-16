@@ -38,17 +38,21 @@ pub fn generate_index(tu: &TranslationUnit, diagnostics: &mut Diagnostics) -> In
 			GlobalDeclKind::Struct(s) => index.insert(s.name),
 			GlobalDeclKind::Type(ty) => index.insert(ty.name),
 			GlobalDeclKind::StaticAssert(_) => None,
-			GlobalDeclKind::Let(_) => {
+			GlobalDeclKind::Let(l) => {
 				diagnostics.push(
 					decl.span.error("global `let`s are deprecated")
 						+ decl.span.marker() + "consider making it a `const`",
 				);
-				None
+				index.insert(l.name)
 			},
 		};
 
 		if let Some(prev) = prev {
-			diagnostics.push(decl.span.error("duplicate declaration") + prev.label("previously declared here"));
+			diagnostics.push(
+				decl.span.error("duplicate declaration")
+					+ prev.label("previously declared here")
+					+ decl.span.label("redeclared here"),
+			);
 		}
 	}
 

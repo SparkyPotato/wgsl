@@ -6,6 +6,7 @@ use crate::{
 	ast::{ExprKind, GlobalDeclKind, Ident, StmtKind, VarDecl},
 	diagnostic::{Diagnostics, Span},
 	resolve::{
+		features::{EnabledFeatures, Feature},
 		inbuilt::{
 			reserved_matcher,
 			AccessMode,
@@ -41,7 +42,7 @@ pub mod ir;
 pub fn resolve(tu: ast::TranslationUnit, intern: &mut Interner, diagnostics: &mut Diagnostics) -> ir::TranslationUnit {
 	let index = index::generate_index(&tu, diagnostics);
 
-	let mut out = ir::TranslationUnit::default();
+	let mut out = ir::TranslationUnit::new(EnabledFeatures::new(intern));
 
 	for enable in tu.enables {
 		out.features.enable(enable, intern, diagnostics);
@@ -71,6 +72,7 @@ pub fn resolve(tu: ast::TranslationUnit, intern: &mut Interner, diagnostics: &mu
 		locals: 0,
 		in_loop: false,
 		in_continuing: false,
+		in_function: false,
 		scopes: Vec::new(),
 	};
 
@@ -105,6 +107,7 @@ struct Resolver<'a> {
 	locals: u32,
 	in_loop: bool,
 	in_continuing: bool,
+	in_function: bool,
 	scopes: Vec<FxHashMap<Text, (LocalId, Span)>>,
 }
 
@@ -116,17 +119,17 @@ impl<'a> Resolver<'a> {
 			GlobalDeclKind::Fn(f) => ir::DeclKind::Fn(self.fn_(f)),
 			GlobalDeclKind::Override(ov) => ir::DeclKind::Override(self.ov(ov)),
 			GlobalDeclKind::Var(v) => ir::DeclKind::Var(ir::Var {
-				attribs: v.attribs.into_iter().filter_map(|x| self.attrib(x)).collect(),
+				attribs: self.var_attribs(v.attribs),
 				inner: self.var(v.inner),
 			}),
-			GlobalDeclKind::Let(l) => ir::DeclKind::Let(self.let_(l)),
+			GlobalDeclKind::Let(l) => ir::DeclKind::Const(self.let_(l)),
 			GlobalDeclKind::Const(c) => ir::DeclKind::Const(self.let_(c)),
 			GlobalDeclKind::StaticAssert(s) => ir::DeclKind::StaticAssert(self.expr(s.expr)),
 			GlobalDeclKind::Struct(s) => {
 				self.verify_ident(s.name);
 				ir::DeclKind::Struct(ir::Struct {
 					name: s.name,
-					fields: s.fields.into_iter().map(|f| self.arg(f)).collect(),
+					fields: s.fields.into_iter().map(|f| self.field(f)).collect(),
 				})
 			},
 			GlobalDeclKind::Type(ty) => {
@@ -146,26 +149,20 @@ impl<'a> Resolver<'a> {
 	fn fn_(&mut self, fn_: ast::Fn) -> ir::Fn {
 		self.verify_ident(fn_.name);
 
-		self.locals += fn_.args.len() as u32;
-		let mut args = FxHashMap::default();
+		self.in_function = true;
 
-		for (id, arg) in fn_.args.iter().enumerate() {
-			let old = args.insert(arg.name.name, (LocalId(id as u32), arg.span));
-			if let Some((_, span)) = old {
-				self.diagnostics
-					.push(arg.name.span.error("duplicate argument name") + span.label("previous argument declaration"));
-			}
-		}
-
-		self.scopes.push(args);
-		let block = self.block(fn_.block);
+		self.scopes.push(FxHashMap::default());
+		let args = fn_.args.into_iter().map(|x| self.arg(x)).collect();
+		let block = self.block_inner(fn_.block);
 		self.scopes.pop();
 
+		self.in_function = false;
+
 		ir::Fn {
-			attribs: fn_.attribs.into_iter().filter_map(|x| self.attrib(x)).collect(),
+			attribs: self.fn_attribs(fn_.attribs),
 			name: fn_.name,
-			args: fn_.args.into_iter().map(|x| self.arg(x)).collect(),
-			ret_attribs: fn_.ret_attribs.into_iter().filter_map(|x| self.attrib(x)).collect(),
+			args,
+			ret_attribs: self.arg_attribs(fn_.ret_attribs),
 			ret: fn_.ret.map(|x| self.ty(x)),
 			block,
 		}
@@ -173,8 +170,28 @@ impl<'a> Resolver<'a> {
 
 	fn ov(&mut self, o: ast::Override) -> ir::Override {
 		self.verify_ident(o.name);
+
+		let mut id = None;
+		let a: Vec<_> = o.attribs.into_iter().filter_map(|x| self.attrib(x)).collect();
+		for attrib in a {
+			match attrib.ty {
+				AttributeType::Id(expr) => {
+					if id.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						id = Some(self.expr(expr));
+					}
+				},
+				_ => {
+					self.diagnostics
+						.push(attrib.span.error("this attribute is not allowed here") + attrib.span.marker());
+				},
+			}
+		}
+
 		ir::Override {
-			attribs: o.attribs.into_iter().filter_map(|x| self.attrib(x)).collect(),
+			id,
 			name: o.name,
 			ty: o.ty.map(|x| self.ty(x)),
 			val: o.val.map(|x| self.expr(x)),
@@ -183,11 +200,25 @@ impl<'a> Resolver<'a> {
 
 	fn arg(&mut self, arg: ast::Arg) -> ir::Arg {
 		self.verify_ident(arg.name);
+
+		let args = self.scopes.last_mut().expect("no scope");
+		let id = LocalId(self.locals);
+		self.locals += 1;
+		let old = args.insert(arg.name.name, (id, arg.span));
+		if let Some((_, span)) = old {
+			self.diagnostics.push(
+				arg.name.span.error("duplicate argument name")
+					+ arg.name.span.label("redeclared here")
+					+ span.label("previously declared here"),
+			);
+		}
+
 		ir::Arg {
-			attribs: arg.attribs.into_iter().filter_map(|x| self.attrib(x)).collect(),
+			attribs: self.arg_attribs(arg.attribs),
 			name: arg.name,
 			ty: self.ty(arg.ty),
 			span: arg.span,
+			id,
 		}
 	}
 
@@ -200,11 +231,284 @@ impl<'a> Resolver<'a> {
 		}
 	}
 
+	fn var_attribs(&mut self, attribs: Vec<ast::Attribute>) -> ir::VarAttribs {
+		let mut out = ir::VarAttribs {
+			group: None,
+			binding: None,
+		};
+
+		let a: Vec<_> = attribs.into_iter().filter_map(|x| self.attrib(x)).collect();
+		for attrib in a {
+			match attrib.ty {
+				AttributeType::Group(g) => {
+					if out.group.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						out.group = Some(self.expr(g));
+					}
+				},
+				AttributeType::Binding(b) => {
+					if out.binding.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						out.binding = Some(self.expr(b));
+					}
+				},
+				_ => {
+					self.diagnostics
+						.push(attrib.span.error("this attribute is not allowed here") + attrib.span.marker());
+				},
+			}
+		}
+
+		out
+	}
+
+	fn arg_attribs(&mut self, attribs: Vec<ast::Attribute>) -> ir::ArgAttribs {
+		let mut out = ir::ArgAttribs {
+			builtin: None,
+			location: None,
+			interpolate: None,
+			invariant: false,
+		};
+
+		let a: Vec<_> = attribs.into_iter().filter_map(|x| self.attrib(x)).collect();
+		for attrib in a {
+			match attrib.ty {
+				AttributeType::Builtin(b) => {
+					if out.builtin.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						out.builtin = Some(b);
+					}
+				},
+				AttributeType::Location(l) => {
+					if out.location.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						out.location = Some(self.expr(l));
+					}
+				},
+				AttributeType::Interpolate(i, s) => {
+					if out.interpolate.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						out.interpolate = Some((i, s));
+					}
+				},
+				AttributeType::Invariant => {
+					if out.invariant {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						out.invariant = true;
+					}
+				},
+				_ => {
+					self.diagnostics
+						.push(attrib.span.error("this attribute is not allowed here") + attrib.span.marker());
+				},
+			}
+		}
+
+		out
+	}
+
+	fn fn_attribs(&mut self, attribs: Vec<ast::Attribute>) -> ir::FnAttribs {
+		let mut out = ir::FnAttribs::None;
+		let mut expect_compute = None;
+
+		let a: Vec<_> = attribs.into_iter().filter_map(|x| self.attrib(x)).collect();
+		for attrib in a {
+			match attrib.ty {
+				AttributeType::Const => self
+					.diagnostics
+					.push(attrib.span.error("user defined `const` functions are not allowed") + attrib.span.marker()),
+				AttributeType::Vertex => {
+					if let ir::FnAttribs::None = out {
+						out = ir::FnAttribs::Vertex;
+					} else {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					}
+				},
+				AttributeType::Fragment => {
+					if let ir::FnAttribs::None = out {
+						out = ir::FnAttribs::Fragment;
+					} else {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					}
+				},
+				AttributeType::Compute => {
+					if let ir::FnAttribs::None = out {
+						expect_compute = Some(attrib.span);
+						out = ir::FnAttribs::Compute(None, None, None);
+					} else if expect_compute.is_some() {
+						expect_compute = None;
+					} else {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					}
+				},
+				AttributeType::WorkgroupSize(x, y, z) => {
+					if let ir::FnAttribs::None = out {
+						expect_compute = Some(attrib.span);
+						out = ir::FnAttribs::Compute(
+							Some(self.expr(x)),
+							y.map(|x| self.expr(x)),
+							z.map(|x| self.expr(x)),
+						);
+					} else if expect_compute.is_some() {
+						expect_compute = None;
+					} else {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					}
+				},
+				_ => {
+					self.diagnostics
+						.push(attrib.span.error("this attribute is not allowed here") + attrib.span.marker());
+				},
+			}
+		}
+
+		if let Some(span) = expect_compute {
+			self.diagnostics.push(
+				span.error(if matches!(out, ir::FnAttribs::Compute(None, _, _)) {
+					"`@compute` without `@workgroup_size` attribute"
+				} else {
+					"`@workgroup_size` without `@compute` attribute"
+				}) + span.marker(),
+			);
+		}
+
+		out
+	}
+
+	fn field(&mut self, field: ast::Arg) -> ir::Field {
+		let mut attribs = ir::FieldAttribs {
+			align: None,
+			builtin: None,
+			location: None,
+			interpolate: None,
+			invariant: false,
+			size: None,
+		};
+
+		let a: Vec<_> = field.attribs.into_iter().filter_map(|x| self.attrib(x)).collect();
+		for attrib in a {
+			match attrib.ty {
+				AttributeType::Align(expr) => {
+					if attribs.align.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						attribs.align = Some(self.expr(expr));
+					}
+				},
+				AttributeType::Builtin(b) => {
+					if attribs.builtin.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						attribs.builtin = Some(b);
+					}
+				},
+				AttributeType::Location(loc) => {
+					if attribs.location.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						attribs.location = Some(self.expr(loc));
+					}
+				},
+				AttributeType::Interpolate(i, s) => {
+					if attribs.interpolate.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						attribs.interpolate = Some((i, s));
+					}
+				},
+				AttributeType::Invariant => {
+					if attribs.invariant {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						attribs.invariant = true;
+					}
+				},
+				AttributeType::Size(expr) => {
+					if attribs.size.is_some() {
+						self.diagnostics
+							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					} else {
+						attribs.size = Some(self.expr(expr));
+					}
+				},
+				_ => {
+					self.diagnostics
+						.push(attrib.span.error("this attribute is not allowed here") + attrib.span.marker());
+				},
+			}
+		}
+
+		ir::Field {
+			attribs,
+			name: field.name,
+			ty: self.ty(field.ty),
+		}
+	}
+
 	fn var(&mut self, v: ast::VarNoAttribs) -> ir::VarNoAttribs {
 		self.verify_ident(v.name);
+
+		let as_ = v
+			.address_space
+			.map(|x| (self.address_space(x), x.span))
+			.and_then(|(a, s)| a.map(|a| (a, s)));
+		let am = v
+			.access_mode
+			.map(|x| (self.access_mode(x), x.span))
+			.and_then(|(a, s)| a.map(|a| (a, s)));
+		let (address_space, access_mode) = self.handle_address_space_and_access_mode(as_, am);
+
+		if self.in_function && address_space != AddressSpace::Function {
+			let span = as_.unwrap().1;
+			self.diagnostics.push(
+				span.error(format!(
+					"cannot declare variable with address space `{}` in a function",
+					address_space
+				)) + span.marker(),
+			);
+		} else if !self.in_function && address_space == AddressSpace::Function {
+			let span = as_.unwrap().1;
+			self.diagnostics.push(
+				span.error("cannot declare variable with address space `function` outside of a function")
+					+ span.marker(),
+			);
+		}
+
+		if let Some(val) = v.val.as_ref() {
+			if !matches!(address_space, AddressSpace::Function | AddressSpace::Private) {
+				self.diagnostics.push(
+					val.span.error(format!(
+						"cannot initialize variable with address space `{}`",
+						address_space
+					)) + val.span.marker(),
+				);
+			}
+		}
+
 		ir::VarNoAttribs {
-			address_space: v.address_space.and_then(|x| self.address_space.get(x.name)),
-			access_mode: v.access_mode.and_then(|x| self.access_mode.get(x.name)),
+			address_space,
+			access_mode,
 			name: v.name,
 			ty: v.ty.map(|x| self.ty(x)),
 			val: v.val.map(|x| self.expr(x)),
@@ -239,6 +543,13 @@ impl<'a> Resolver<'a> {
 	}
 
 	fn block(&mut self, block: ast::Block) -> ir::Block {
+		self.scopes.push(FxHashMap::default());
+		let ret = self.block_inner(block);
+		self.scopes.pop();
+		ret
+	}
+
+	fn block_inner(&mut self, block: ast::Block) -> ir::Block {
 		let mut stmts = Vec::with_capacity(block.stmts.len());
 		let last = block.stmts.len().wrapping_sub(1);
 		for (i, stmt) in block.stmts.into_iter().enumerate() {
@@ -265,12 +576,7 @@ impl<'a> Resolver<'a> {
 
 	fn stmt(&mut self, stmt: ast::Stmt) -> Option<ir::Stmt> {
 		let kind = match stmt.kind {
-			StmtKind::Block(block) => {
-				self.scopes.push(FxHashMap::default());
-				let ret = ir::StmtKind::Block(self.block(block));
-				self.scopes.pop();
-				ret
-			},
+			StmtKind::Block(block) => ir::StmtKind::Block(self.block(block)),
 			StmtKind::Expr(expr) => ir::StmtKind::Expr(self.expr_statement(expr)?.kind),
 			StmtKind::Break => ir::StmtKind::Break,
 			StmtKind::Continue => ir::StmtKind::Continue,
@@ -288,9 +594,7 @@ impl<'a> Resolver<'a> {
 						Some(x)
 					}
 				});
-				self.scopes.push(FxHashMap::default());
-				let block = self.block(for_.block);
-				self.scopes.pop();
+				let block = self.block_inner(for_.block);
 				self.scopes.pop();
 
 				ir::StmtKind::For(ir::For {
@@ -302,9 +606,7 @@ impl<'a> Resolver<'a> {
 			},
 			StmtKind::If(if_) => {
 				let cond = self.expr(if_.cond);
-				self.scopes.push(FxHashMap::default());
 				let block = self.block(if_.block);
-				self.scopes.pop();
 				let mut else_ = if_.else_.and_then(|x| self.stmt(*x)).map(Box::new);
 
 				if !matches!(
@@ -320,9 +622,7 @@ impl<'a> Resolver<'a> {
 			},
 			StmtKind::Loop(block) => {
 				self.in_loop = true;
-				self.scopes.push(FxHashMap::default());
 				let block = self.block(block);
-				self.scopes.pop();
 				self.in_loop = false;
 				ir::StmtKind::Loop(block)
 			},
@@ -342,24 +642,14 @@ impl<'a> Resolver<'a> {
 								ast::CaseSelector::Default => ir::CaseSelector::Default,
 							})
 							.collect(),
-						block: {
-							self.scopes.push(FxHashMap::default());
-							let ret = self.block(case.block);
-							self.scopes.pop();
-							ret
-						},
+						block: self.block(case.block),
 						span: case.span,
 					})
 					.collect(),
 			}),
 			StmtKind::While(while_) => ir::StmtKind::While(ir::While {
 				cond: self.expr(while_.cond),
-				block: {
-					self.scopes.push(FxHashMap::default());
-					let ret = self.block(while_.block);
-					self.scopes.pop();
-					ret
-				},
+				block: self.block(while_.block),
 			}),
 			StmtKind::Continuing(c) => {
 				if !self.in_loop {
@@ -368,9 +658,7 @@ impl<'a> Resolver<'a> {
 				}
 				self.in_loop = false;
 				self.in_continuing = true;
-				self.scopes.push(FxHashMap::default());
 				let block = self.block(c);
-				self.scopes.pop();
 				self.in_continuing = false;
 				ir::StmtKind::Continuing(block)
 			},
@@ -399,7 +687,17 @@ impl<'a> Resolver<'a> {
 					.push(expr.span.error("cannot use variable declaration as an expression") + expr.span.marker());
 				ir::ExprKind::Error
 			},
-			ExprKind::Literal(l) => ir::ExprKind::Literal(l),
+			ExprKind::Literal(l) => {
+				match l {
+					ast::Literal::F16(_) => {
+						self.tu
+							.features
+							.require(Feature::Float16, expr.span, &mut self.diagnostics)
+					},
+					_ => {},
+				}
+				ir::ExprKind::Literal(l)
+			},
 			ExprKind::Ident(ident) => {
 				self.verify_ident(ident.name);
 				if ident.generics.len() != 0 {
@@ -462,7 +760,8 @@ impl<'a> Resolver<'a> {
 						if let Some((_, span)) = old {
 							self.diagnostics.push(
 								name.span.error("shadowing is not allowed in the same scope")
-									+ span.label("previous declaration"),
+									+ span.label("previously declared here")
+									+ name.span.label("redeclared here"),
 							);
 						}
 
@@ -478,14 +777,38 @@ impl<'a> Resolver<'a> {
 			ExprKind::Assign(assign) => {
 				if let ExprKind::Underscore = &assign.lhs.kind {
 					if let ast::AssignOp::Assign = assign.op {
-						ir::ExprStatementKind::IgnoreExpr(self.expr(*assign.rhs))
+						ir::ExprStatementKind::Assign(ir::AssignExpr {
+							lhs: Box::new(ir::AssignTarget {
+								kind: ir::AssignTargetKind::Ignore,
+								span: assign.lhs.span,
+							}),
+							op: ast::AssignOp::Assign,
+							rhs: Box::new(self.expr(*assign.rhs)),
+						})
 					} else {
 						self.diagnostics
 							.push(assign.lhs.span.error("`_` is not allowed here") + assign.lhs.span.marker());
 						return None;
 					}
 				} else {
-					let lhs = Box::new(self.expr(*assign.lhs));
+					let lhs = self.expr(*assign.lhs);
+
+					let kind = match lhs.kind {
+						ir::ExprKind::Local(l) => ir::AssignTargetKind::Local(l),
+						ir::ExprKind::Global(g) => ir::AssignTargetKind::Global(g),
+						ir::ExprKind::Member(m, i) => ir::AssignTargetKind::Member(m, i),
+						ir::ExprKind::Index(i, w) => ir::AssignTargetKind::Index(i, w),
+						ir::ExprKind::Unary(unary) if matches!(unary.op, ast::UnaryOp::Deref) => {
+							ir::AssignTargetKind::Deref(unary.expr)
+						},
+						_ => {
+							self.diagnostics
+								.push(lhs.span.error("cannot assign to this expression") + lhs.span.marker());
+							ir::AssignTargetKind::Ignore
+						},
+					};
+					let lhs = Box::new(ir::AssignTarget { kind, span: lhs.span });
+
 					let rhs = Box::new(self.expr(*assign.rhs));
 					ir::ExprStatementKind::Assign(ir::AssignExpr {
 						lhs,
@@ -554,16 +877,14 @@ impl<'a> Resolver<'a> {
 		} else if let Some(prim) = self.primitive.get(name) {
 			match prim {
 				PrimitiveType::F64 => {
-					if !self.tu.features.float64 {
-						self.diagnostics
-							.push(ident.name.span.error("feature `f64` not enabled") + ident.name.span.marker());
-					}
+					self.tu
+						.features
+						.require(Feature::Float64, ident.name.span, &mut self.diagnostics)
 				},
 				PrimitiveType::F16 => {
-					if !self.tu.features.float16 {
-						self.diagnostics
-							.push(ident.name.span.error("feature `f16` not enabled") + ident.name.span.marker());
-					}
+					self.tu
+						.features
+						.require(Feature::Float16, ident.name.span, &mut self.diagnostics)
 				},
 				_ => {},
 			}
@@ -653,16 +974,14 @@ impl<'a> Resolver<'a> {
 
 					match prim {
 						PrimitiveType::F64 => {
-							if !self.tu.features.float64 {
-								self.diagnostics
-									.push(ident.span.error("feature `f64` is not enabled") + ident.span.marker());
-							}
+							self.tu
+								.features
+								.require(Feature::Float64, ident.span, &mut self.diagnostics)
 						},
 						PrimitiveType::F16 => {
-							if !self.tu.features.float16 {
-								self.diagnostics
-									.push(ident.span.error("feature `float16` is not enabled") + ident.span.marker());
-							}
+							self.tu
+								.features
+								.require(Feature::Float16, ident.span, &mut self.diagnostics)
 						},
 						_ => {},
 					}
@@ -774,13 +1093,13 @@ impl<'a> Resolver<'a> {
 					let to = generics.next().map(|x| self.ty(x));
 					let access_mode = generics.next();
 
-					let address_space = if let Some(address_space) = address_space {
-						self.ty_to_ident(address_space, "address space")
-							.and_then(|x| self.address_space.get(x.name))
-							.unwrap_or(AddressSpace::Private)
-					} else {
-						AddressSpace::Private
-					};
+					let address_space = address_space
+						.and_then(|x| {
+							self.ty_to_ident(x, "address space")
+								.map(|x| (self.address_space(x), x.span))
+						})
+						.and_then(|(a, s)| a.map(|a| (a, s)));
+
 					let to = if let Some(to) = to {
 						to
 					} else {
@@ -793,27 +1112,18 @@ impl<'a> Resolver<'a> {
 					};
 					let access_mode = access_mode
 						.and_then(|access_mode| {
-							if address_space == AddressSpace::Storage {
-								self.ty_to_ident(access_mode, "access mode")
-									.and_then(|x| self.access_mode.get(x.name))
-							} else {
-								self.diagnostics.push(
-									access_mode
-										.span
-										.error("access mode is not allowed for this address space")
-										+ access_mode.span.marker(),
-								);
-								None
-							}
+							self.ty_to_ident(access_mode, "access mode")
+								.map(|x| (self.access_mode(x), x.span))
 						})
-						.unwrap_or(match address_space {
-							AddressSpace::Function => AccessMode::ReadWrite,
-							AddressSpace::Private => AccessMode::ReadWrite,
-							AddressSpace::Storage => AccessMode::Read,
-							AddressSpace::Uniform => AccessMode::Read,
-							AddressSpace::Workgroup => AccessMode::ReadWrite,
-							AddressSpace::PushConstant => AccessMode::Read,
-						});
+						.and_then(|(a, s)| a.map(|a| (a, s)));
+
+					if address_space.is_none() {
+						self.diagnostics
+							.push(ty.span.error(format!("expected address space")) + ty.span.marker());
+					}
+
+					let (address_space, access_mode) =
+						self.handle_address_space_and_access_mode(address_space, access_mode);
 
 					InbuiltType::Ptr {
 						address_space,
@@ -867,19 +1177,19 @@ impl<'a> Resolver<'a> {
 					let texel_format = generics
 						.next()
 						.and_then(|x| self.ty_to_ident(x, "texel format"))
-						.and_then(|x| self.texel_format.get(x.name))
+						.and_then(|x| self.texel_format(x))
 						.unwrap_or(TexelFormat::Rgba8Unorm);
 					let access = generics
 						.next()
 						.and_then(|x| self.ty_to_ident(x, "access mode"))
-						.map(|x| (self.access_mode.get(x.name), x.span));
+						.map(|x| (self.access_mode(x), x.span));
 
 					let access = if let Some((access, span)) = access {
 						let access = access.unwrap_or(AccessMode::Write);
-						if access != AccessMode::Write && !self.tu.features.storage_image_other_access {
-							self.diagnostics.push(
-								span.error("feature `storage_image_other_access` is not enabled") + span.marker(),
-							);
+						if access != AccessMode::Write {
+							self.tu
+								.features
+								.require(Feature::StorageImageRead, span, &mut self.diagnostics);
 						}
 						access
 					} else {
@@ -902,10 +1212,9 @@ impl<'a> Resolver<'a> {
 					}
 				} else {
 					// Is `binding_array`
-					if !self.tu.features.binding_array {
-						self.diagnostics
-							.push(array.span.error("feature `binding_array` is not enabled") + array.span.marker());
-					}
+					self.tu
+						.features
+						.require(Feature::BindingArray, array.span, &mut self.diagnostics);
 
 					InbuiltType::BindingArray {
 						of: Box::new(self.ty(*of)),
@@ -940,17 +1249,23 @@ impl<'a> Resolver<'a> {
 		};
 
 		let ty = match attrib.name.name {
-			x if x == self.kws.align => args(self, 1).map(|_| AttributeType::Align(attrib.exprs[0].clone())),
-			x if x == self.kws.binding => args(self, 1).map(|_| AttributeType::Binding(attrib.exprs[0].clone())),
+			x if x == self.kws.align => {
+				args(self, 1).map(|_| AttributeType::Align(attrib.exprs.into_iter().next().unwrap()))
+			},
+			x if x == self.kws.binding => {
+				args(self, 1).map(|_| AttributeType::Binding(attrib.exprs.into_iter().next().unwrap()))
+			},
 			x if x == self.kws.builtin => args(self, 1).and_then(|_| {
 				expr_as_ident(self, &attrib.exprs[0])
-					.and_then(|ident| self.builtin.get(ident.name).map(|x| AttributeType::Builtin(x)))
+					.and_then(|ident| self.builtin(ident).map(|x| AttributeType::Builtin(x)))
 			}),
 			x if x == self.kws.compute => args(self, 0).map(|_| AttributeType::Compute),
 			x if x == self.kws.const_ => args(self, 0).map(|_| AttributeType::Const),
 			x if x == self.kws.fragment => args(self, 0).map(|_| AttributeType::Fragment),
-			x if x == self.kws.group => args(self, 1).map(|_| AttributeType::Group(attrib.exprs[0].clone())),
-			x if x == self.kws.id => args(self, 1).map(|_| AttributeType::Id(attrib.exprs[0].clone())),
+			x if x == self.kws.group => {
+				args(self, 1).map(|_| AttributeType::Group(attrib.exprs.into_iter().next().unwrap()))
+			},
+			x if x == self.kws.id => args(self, 1).map(|_| AttributeType::Id(attrib.exprs.into_iter().next().unwrap())),
 			x if x == self.kws.interpolate => {
 				if attrib.exprs.len() < 1 || attrib.exprs.len() > 2 {
 					self.diagnostics
@@ -958,13 +1273,13 @@ impl<'a> Resolver<'a> {
 					None
 				} else {
 					let ty = expr_as_ident(self, &attrib.exprs[0])
-						.and_then(|x| self.interpolation_type.get(x.name))
+						.and_then(|x| self.interpolation_type(x))
 						.unwrap_or(InterpolationType::Perspective);
 					let sample = attrib
 						.exprs
 						.get(1)
 						.and_then(|x| expr_as_ident(self, x))
-						.and_then(|x| self.interpolation_sample.get(x.name));
+						.and_then(|x| self.interpolation_sample(x));
 
 					if ty == InterpolationType::Flat && sample.is_some() {
 						let span = attrib.exprs[1].span;
@@ -979,8 +1294,12 @@ impl<'a> Resolver<'a> {
 				}
 			},
 			x if x == self.kws.invariant => args(self, 0).map(|_| AttributeType::Invariant),
-			x if x == self.kws.location => args(self, 1).map(|_| AttributeType::Location(attrib.exprs[0].clone())),
-			x if x == self.kws.size => args(self, 1).map(|_| AttributeType::Size(attrib.exprs[0].clone())),
+			x if x == self.kws.location => {
+				args(self, 1).map(|_| AttributeType::Location(attrib.exprs.into_iter().next().unwrap()))
+			},
+			x if x == self.kws.size => {
+				args(self, 1).map(|_| AttributeType::Size(attrib.exprs.into_iter().next().unwrap()))
+			},
 			x if x == self.kws.vertex => args(self, 0).map(|_| AttributeType::Vertex),
 			x if x == self.kws.workgroup_size => {
 				if attrib.exprs.len() < 1 || attrib.exprs.len() > 3 {
@@ -988,9 +1307,10 @@ impl<'a> Resolver<'a> {
 						.push(attrib.span.error("expected 1, 2, or 3 arguments") + attrib.span.marker());
 					None
 				} else {
-					let x = attrib.exprs[0].clone();
-					let y = attrib.exprs.get(1).cloned();
-					let z = attrib.exprs.get(2).cloned();
+					let mut iter = attrib.exprs.into_iter();
+					let x = iter.next().unwrap();
+					let y = iter.next();
+					let z = iter.next();
 					Some(AttributeType::WorkgroupSize(x, y, z))
 				}
 			},
@@ -1002,6 +1322,77 @@ impl<'a> Resolver<'a> {
 		};
 
 		ty.map(|ty| ir::Attribute { span: attrib.span, ty })
+	}
+
+	fn access_mode(&mut self, ident: Ident) -> Option<AccessMode> {
+		match self.access_mode.get(ident.name) {
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown access mode") + ident.span.marker());
+				None
+			},
+		}
+	}
+
+	fn address_space(&mut self, ident: Ident) -> Option<AddressSpace> {
+		match self.address_space.get(ident.name) {
+			Some(AddressSpace::Handle) => {
+				self.diagnostics
+					.push(ident.span.error("`handle` address space is not allowed here") + ident.span.marker());
+				Some(AddressSpace::Handle)
+			},
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown address space") + ident.span.marker());
+				None
+			},
+		}
+	}
+
+	fn builtin(&mut self, ident: Ident) -> Option<Builtin> {
+		match self.builtin.get(ident.name) {
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown builtin") + ident.span.marker());
+				None
+			},
+		}
+	}
+
+	fn interpolation_sample(&mut self, ident: Ident) -> Option<InterpolationSample> {
+		match self.interpolation_sample.get(ident.name) {
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown interpolation sample") + ident.span.marker());
+				None
+			},
+		}
+	}
+
+	fn interpolation_type(&mut self, ident: Ident) -> Option<InterpolationType> {
+		match self.interpolation_type.get(ident.name) {
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown interpolation type") + ident.span.marker());
+				None
+			},
+		}
+	}
+
+	fn texel_format(&mut self, ident: Ident) -> Option<TexelFormat> {
+		match self.texel_format.get(ident.name) {
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown texel format") + ident.span.marker());
+				None
+			},
+		}
 	}
 
 	fn ty_to_ident(&mut self, ty: ast::Type, expected: &str) -> Option<Ident> {
@@ -1019,6 +1410,42 @@ impl<'a> Resolver<'a> {
 				None
 			},
 		}
+	}
+
+	fn handle_address_space_and_access_mode(
+		&mut self, address_space: Option<(AddressSpace, Span)>, access_mode: Option<(AccessMode, Span)>,
+	) -> (AddressSpace, AccessMode) {
+		let address_space = address_space.map(|x| x.0).unwrap_or_else(|| {
+			if self.in_function {
+				AddressSpace::Function
+			} else {
+				AddressSpace::Private
+			}
+		});
+
+		let default = || match address_space {
+			AddressSpace::Function => AccessMode::ReadWrite,
+			AddressSpace::Private => AccessMode::ReadWrite,
+			AddressSpace::Storage => AccessMode::Read,
+			AddressSpace::Uniform => AccessMode::Read,
+			AddressSpace::Workgroup => AccessMode::ReadWrite,
+			AddressSpace::Handle => AccessMode::Read,
+			AddressSpace::PushConstant => AccessMode::Read,
+		};
+
+		let access_mode = if let Some((mode, span)) = access_mode {
+			if address_space != AddressSpace::Storage {
+				self.diagnostics
+					.push(span.error("access mode is not allowed here") + span.marker());
+				default()
+			} else {
+				mode
+			}
+		} else {
+			default()
+		};
+
+		(address_space, access_mode)
 	}
 
 	fn verify_ident(&mut self, ident: Ident) {

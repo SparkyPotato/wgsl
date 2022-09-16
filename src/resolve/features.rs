@@ -1,28 +1,82 @@
-use crate::{ast::Enable, diagnostic::Diagnostics, text::Interner};
+use std::fmt::{Debug, Display};
 
-#[derive(Copy, Clone, Debug, Default)]
+use rustc_hash::FxHashSet;
+use strum::EnumIter;
+
+use crate::{
+	ast::Enable,
+	diagnostic::{Diagnostics, Span},
+	resolve::inbuilt::{Matcher, ToStaticString},
+	text::Interner,
+};
+
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, EnumIter)]
+pub enum Feature {
+	Float16,
+	Float64,
+	PrimitiveIndex,
+	BindingArray,
+	PushConstant,
+	StorageImageRead,
+	Multiview,
+}
+
+impl ToStaticString for Feature {
+	fn to_static_str(&self) -> &'static str {
+		match self {
+			Feature::Float16 => "f16",
+			Feature::Float64 => "f64",
+			Feature::PrimitiveIndex => "primitive_index",
+			Feature::BindingArray => "binding_array",
+			Feature::PushConstant => "push_constant",
+			Feature::StorageImageRead => "storage_image_read",
+			Feature::Multiview => "multiview",
+		}
+	}
+}
+
+impl Display for Feature {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Clone)]
 pub struct EnabledFeatures {
-	pub float16: bool,
-	pub float64: bool,
-	pub primitive_index: bool,
-	pub binding_array: bool,
-	pub push_constant: bool,
-	pub storage_image_other_access: bool,
-	pub multiview: bool,
+	features: FxHashSet<Feature>,
+	matcher: Matcher<Feature>,
+}
+
+impl Debug for EnabledFeatures {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_set().entries(self.features.iter()).finish()
+	}
 }
 
 impl EnabledFeatures {
+	pub fn new(intern: &mut Interner) -> Self {
+		Self {
+			features: FxHashSet::default(),
+			matcher: Matcher::new(intern),
+		}
+	}
+
 	pub fn enable(&mut self, enable: Enable, intern: &Interner, diagnostics: &mut Diagnostics) {
-		let s = intern.resolve(enable.name.name);
-		match s {
-			"f16" => self.float16 = true,
-			"f64" => self.float64 = true,
-			"primitive_index" => self.primitive_index = true,
-			"binding_array" => self.binding_array = true,
-			"push_constant" => self.push_constant = true,
-			"storage_image_other_access" => self.storage_image_other_access = true,
-			"multiview" => self.multiview = true,
-			_ => diagnostics.push(enable.span.error("unknown feature") + enable.name.span.marker()),
+		if let Some(feature) = self.matcher.get(enable.name.name) {
+			self.features.insert(feature);
+		} else {
+			diagnostics.push(
+				enable
+					.name
+					.span
+					.error(format!("unknown feature `{}`", intern.resolve(enable.name.name)))
+					+ enable.name.span.marker(),
+			);
+		}
+	}
+
+	pub fn require(&mut self, feature: Feature, span: Span, diagnostics: &mut Diagnostics) {
+		if !self.features.contains(&feature) {
+			diagnostics.push(span.error(format!("feature `{}` is not enabled", feature)) + span.marker());
+			self.features.insert(feature); // Only error once.
 		}
 	}
 }
