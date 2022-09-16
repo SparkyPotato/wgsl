@@ -469,6 +469,8 @@ impl<'a> Resolver<'a> {
 	fn var(&mut self, v: ast::VarNoAttribs) -> ir::VarNoAttribs {
 		self.verify_ident(v.name);
 
+		let ty = v.ty.map(|x| self.ty(x));
+
 		let as_ = v
 			.address_space
 			.map(|x| (self.address_space(x), x.span))
@@ -478,6 +480,23 @@ impl<'a> Resolver<'a> {
 			.map(|x| (self.access_mode(x), x.span))
 			.and_then(|(a, s)| a.map(|a| (a, s)));
 		let (address_space, access_mode) = self.handle_address_space_and_access_mode(as_, am);
+
+		let (address_space, access_mode) = if address_space == AddressSpace::Handle {
+			if let Some(ir::TypeKind::Inbuilt(
+				InbuiltType::BindingArray { .. }
+				| InbuiltType::Sampler(_)
+				| InbuiltType::StorageTexture(..)
+				| InbuiltType::SampledTexture(..),
+			)) = ty.as_ref().map(|x| &x.kind)
+			{
+				// Infer handle if its a resource type.
+				(AddressSpace::Handle, AccessMode::Read)
+			} else {
+				(AddressSpace::Private, AccessMode::ReadWrite)
+			}
+		} else {
+			(address_space, access_mode)
+		};
 
 		if self.in_function && address_space != AddressSpace::Function {
 			let span = as_.unwrap().1;
@@ -510,7 +529,7 @@ impl<'a> Resolver<'a> {
 			address_space,
 			access_mode,
 			name: v.name,
-			ty: v.ty.map(|x| self.ty(x)),
+			ty,
 			val: v.val.map(|x| self.expr(x)),
 		}
 	}
@@ -1419,7 +1438,7 @@ impl<'a> Resolver<'a> {
 			if self.in_function {
 				AddressSpace::Function
 			} else {
-				AddressSpace::Private
+				AddressSpace::Handle // Is not user-settable, so use as a sentinel.
 			}
 		});
 
@@ -1429,7 +1448,7 @@ impl<'a> Resolver<'a> {
 			AddressSpace::Storage => AccessMode::Read,
 			AddressSpace::Uniform => AccessMode::Read,
 			AddressSpace::Workgroup => AccessMode::ReadWrite,
-			AddressSpace::Handle => AccessMode::Read,
+			AddressSpace::Handle => AccessMode::ReadWrite, // Doesn't matter what we return.
 			AddressSpace::PushConstant => AccessMode::Read,
 		};
 
