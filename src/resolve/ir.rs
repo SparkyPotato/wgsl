@@ -41,6 +41,14 @@ pub struct TranslationUnit {
 }
 
 impl TranslationUnit {
+	pub fn decls(&self) -> impl Iterator<Item = (DeclId, &Decl)> {
+		self.decls.iter().enumerate().map(|(i, d)| (DeclId(i as u32), d))
+	}
+
+	pub fn get(&self, id: DeclId) -> &Decl { &self.decls[id.0 as usize] }
+}
+
+impl TranslationUnit {
 	pub fn new(features: EnabledFeatures) -> Self {
 		Self {
 			features,
@@ -219,8 +227,6 @@ pub enum SampleType {
 
 #[derive(Clone, Debug)]
 pub enum InbuiltType {
-	AbstractInt,
-	AbstractFloat,
 	Primitive(PrimitiveType),
 	Vec {
 		ty: PrimitiveType,
@@ -241,9 +247,6 @@ pub enum InbuiltType {
 	BindingArray {
 		of: Box<Type>,
 		len: Option<Expr>,
-	},
-	CompareExchangeResult {
-		signed: bool, // Only i32 and u32 are allowed.
 	},
 	Ptr {
 		to: Box<Type>,

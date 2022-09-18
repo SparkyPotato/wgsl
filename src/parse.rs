@@ -16,10 +16,9 @@ struct Parser<'a> {
 	lexer: Lexer<'a>,
 }
 
-pub fn parse(intern: &mut Interner, diagnostics: &mut Diagnostics, source: &str, file_name: &str) -> TranslationUnit {
-	let file = intern.get(file_name);
+pub fn parse(intern: &mut Interner, diagnostics: &mut Diagnostics, source: &str) -> TranslationUnit {
 	let (tu, errors) = Parser {
-		lexer: Lexer::new(source, file),
+		lexer: Lexer::new(source),
 		intern,
 		diagnostics,
 	}

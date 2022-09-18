@@ -1,7 +1,5 @@
 use std::ops::{Add, Range};
 
-use crate::text::Text;
-
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum DiagnosticKind {
 	Error,
@@ -45,35 +43,31 @@ pub struct Label {
 pub struct Span {
 	pub start: u32,
 	pub end: u32,
-	pub file: Text,
 }
 
 impl Add for Span {
 	type Output = Span;
 
 	fn add(self, other: Span) -> Self::Output {
-		debug_assert_eq!(self.file, other.file);
 		Span {
 			start: self.start.min(other.start),
 			end: self.end.max(other.end),
-			file: self.file,
 		}
 	}
 }
 
 impl chumsky::Span for Span {
-	type Context = Text;
+	type Context = ();
 	type Offset = u32;
 
-	fn new(context: Self::Context, range: Range<Self::Offset>) -> Self {
+	fn new(_: Self::Context, range: Range<Self::Offset>) -> Self {
 		Self {
 			start: range.start,
 			end: range.end,
-			file: context,
 		}
 	}
 
-	fn context(&self) -> Self::Context { self.file }
+	fn context(&self) -> Self::Context { () }
 
 	fn start(&self) -> Self::Offset { self.start }
 
@@ -139,4 +133,6 @@ impl Diagnostics {
 	pub fn had_error(&self) -> bool { self.had_error }
 
 	pub fn diags(&self) -> &[Diagnostic] { &self.diagnostics }
+
+	pub fn take(&mut self) -> Vec<Diagnostic> { std::mem::take(&mut self.diagnostics) }
 }

@@ -2,18 +2,16 @@ use std::fmt::{Debug, Display};
 
 use logos::Logos;
 
-use crate::{diagnostic::Span, text::Text};
+use crate::{diagnostic::Span};
 
 #[derive(Clone)]
 pub struct Lexer<'a> {
-	file: Text,
 	inner: logos::Lexer<'a, TokenKind>,
 }
 
 impl<'a> Lexer<'a> {
-	pub fn new(source: &'a str, file: Text) -> Self {
+	pub fn new(source: &'a str) -> Self {
 		Self {
-			file,
 			inner: logos::Lexer::new(source),
 		}
 	}
@@ -22,7 +20,6 @@ impl<'a> Lexer<'a> {
 		Span {
 			start: self.inner.source().len() as _,
 			end: self.inner.source().len() as u32 + 1,
-			file: self.file,
 		}
 	}
 }
@@ -38,7 +35,6 @@ impl Iterator for Lexer<'_> {
 			span: Span {
 				start: span.start as _,
 				end: span.end as _,
-				file: self.file,
 			},
 		})
 	}

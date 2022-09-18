@@ -586,7 +586,7 @@ impl<'a> Resolver<'a> {
 			} else {
 				self.diagnostics
 					.push(ident.span.error("undefined type") + ident.span.marker());
-				ir::TypeKind::Inbuilt(InbuiltType::AbstractInt)
+				ir::TypeKind::Inbuilt(InbuiltType::Primitive(PrimitiveType::Infer))
 			}
 		};
 

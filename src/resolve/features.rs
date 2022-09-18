@@ -61,6 +61,8 @@ impl EnabledFeatures {
 		}
 	}
 
+	pub fn is_enabled(&self, feature: Feature) -> bool { self.features.contains(&feature) }
+
 	pub fn enable(&mut self, enable: Enable, intern: &Interner, diagnostics: &mut Diagnostics) {
 		if let Some(feature) = self.matcher.get(enable.name.name) {
 			self.features.insert(feature);
