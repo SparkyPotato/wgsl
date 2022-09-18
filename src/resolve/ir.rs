@@ -12,6 +12,7 @@ use crate::{
 			AddressSpace,
 			AttributeType,
 			Builtin,
+			ConservativeDepth,
 			DepthTextureType,
 			InterpolationSample,
 			InterpolationType,
@@ -109,7 +110,7 @@ pub struct Fn {
 pub enum FnAttribs {
 	None,
 	Vertex,
-	Fragment,
+	Fragment(Option<ConservativeDepth>),
 	Compute(Option<Expr>, Option<Expr>, Option<Expr>),
 }
 

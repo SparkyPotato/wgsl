@@ -19,6 +19,7 @@ pub enum Feature {
 	PushConstant,
 	StorageImageRead,
 	Multiview,
+	ConservativeDepth,
 }
 
 impl ToStaticString for Feature {
@@ -31,6 +32,7 @@ impl ToStaticString for Feature {
 			Feature::PushConstant => "push_constant",
 			Feature::StorageImageRead => "storage_image_read",
 			Feature::Multiview => "multiview",
+			Feature::ConservativeDepth => "conservative_depth",
 		}
 	}
 }

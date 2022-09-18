@@ -13,6 +13,7 @@ use crate::{
 			AddressSpace,
 			AttributeType,
 			Builtin,
+			ConservativeDepth,
 			DepthTextureType,
 			InterpolationSample,
 			InterpolationType,
@@ -64,6 +65,7 @@ pub fn resolve(tu: ast::TranslationUnit, intern: &mut Interner, diagnostics: &mu
 		sampler: Matcher::new(intern),
 		storage_texture: Matcher::new(intern),
 		texel_format: Matcher::new(intern),
+		conservative_depth: Matcher::new(intern),
 		inbuilt_function: Matcher::new(intern),
 		tu: &mut out,
 		index,
@@ -106,6 +108,7 @@ struct Resolver<'a> {
 	sampler: Matcher<SamplerType>,
 	storage_texture: Matcher<StorageTextureType>,
 	texel_format: Matcher<TexelFormat>,
+	conservative_depth: Matcher<ConservativeDepth>,
 	inbuilt_function: Matcher<InbuiltFunction>,
 	kws: Box<Kws>,
 	locals: u32,
@@ -356,7 +359,7 @@ impl<'a> Resolver<'a> {
 				},
 				AttributeType::Fragment => {
 					if let ir::FnAttribs::None = out {
-						out = ir::FnAttribs::Fragment;
+						out = ir::FnAttribs::Fragment(None);
 					} else {
 						self.diagnostics
 							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
@@ -386,6 +389,14 @@ impl<'a> Resolver<'a> {
 					} else {
 						self.diagnostics
 							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
+					}
+				},
+				AttributeType::ConservativeDepth(depth) => {
+					if let ir::FnAttribs::Fragment(_) = out {
+						out = ir::FnAttribs::Fragment(Some(depth));
+					} else {
+						self.diagnostics
+							.push(attrib.span.error("this attribute is not allowed here") + attrib.span.marker());
 					}
 				},
 				_ => {
@@ -1362,6 +1373,13 @@ impl<'a> Resolver<'a> {
 					Some(AttributeType::WorkgroupSize(x, y, z))
 				}
 			},
+			x if x == self.kws.early_depth_test => args(self, 1).map(|_| {
+				AttributeType::ConservativeDepth(
+					expr_as_ident(self, &attrib.exprs.into_iter().next().unwrap())
+						.and_then(|x| self.conservative_depth(x))
+						.unwrap_or(ConservativeDepth::Unchanged),
+				)
+			}),
 			_ => {
 				self.diagnostics
 					.push(attrib.name.span.error("unknown attribute") + attrib.name.span.marker());
@@ -1438,6 +1456,17 @@ impl<'a> Resolver<'a> {
 			None => {
 				self.diagnostics
 					.push(ident.span.error("unknown texel format") + ident.span.marker());
+				None
+			},
+		}
+	}
+
+	fn conservative_depth(&mut self, ident: Ident) -> Option<ConservativeDepth> {
+		match self.conservative_depth.get(ident.name) {
+			Some(x) => Some(x),
+			None => {
+				self.diagnostics
+					.push(ident.span.error("unknown conservative depth") + ident.span.marker());
 				None
 			},
 		}
@@ -1552,6 +1581,7 @@ struct Kws {
 	size: Text,
 	vertex: Text,
 	workgroup_size: Text,
+	early_depth_test: Text,
 	array: Text,
 	atomic: Text,
 	ptr: Text,
@@ -1574,6 +1604,7 @@ impl Kws {
 			size: intern.get_static("size"),
 			vertex: intern.get_static("vertex"),
 			workgroup_size: intern.get_static("workgroup_size"),
+			early_depth_test: intern.get_static("early_depth_test"),
 			array: intern.get_static("array"),
 			atomic: intern.get_static("atomic"),
 			ptr: intern.get_static("ptr"),

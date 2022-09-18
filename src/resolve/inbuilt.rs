@@ -79,6 +79,7 @@ pub enum AttributeType {
 	Size(Expr),
 	Vertex,
 	WorkgroupSize(Expr, Option<Expr>, Option<Expr>),
+	ConservativeDepth(ConservativeDepth),
 }
 
 impl Display for AttributeType {
@@ -98,6 +99,7 @@ impl Display for AttributeType {
 			AttributeType::Size(_) => write!(f, "size"),
 			AttributeType::Vertex => write!(f, "vertex"),
 			AttributeType::WorkgroupSize(..) => write!(f, "workgroup_size"),
+			AttributeType::ConservativeDepth(_) => write!(f, "early_depth_test"),
 		}
 	}
 }
@@ -414,6 +416,27 @@ impl ToStaticString for TexelFormat {
 }
 
 impl Display for TexelFormat {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, EnumIter)]
+pub enum ConservativeDepth {
+	GreaterEqual,
+	LessEqual,
+	Unchanged,
+}
+
+impl ToStaticString for ConservativeDepth {
+	fn to_static_str(&self) -> &'static str {
+		match self {
+			ConservativeDepth::GreaterEqual => "greater_equal",
+			ConservativeDepth::LessEqual => "less_equal",
+			ConservativeDepth::Unchanged => "unchanged",
+		}
+	}
+}
+
+impl Display for ConservativeDepth {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_static_str()) }
 }
 
