@@ -188,11 +188,8 @@ pub struct Field {
 #[derive(Clone, Debug)]
 pub struct FieldAttribs {
 	pub align: Option<Expr>,
-	pub builtin: Option<Builtin>,
-	pub location: Option<Expr>,
-	pub interpolate: Option<(InterpolationType, InterpolationSample)>,
-	pub invariant: bool,
 	pub size: Option<Expr>,
+	pub arg: ArgAttribs,
 }
 
 #[derive(Clone, Debug)]

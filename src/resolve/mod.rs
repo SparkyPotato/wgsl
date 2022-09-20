@@ -422,10 +422,12 @@ impl<'a> Resolver<'a> {
 	fn field(&mut self, field: ast::Arg) -> ir::Field {
 		let mut attribs = ir::FieldAttribs {
 			align: None,
-			builtin: None,
-			location: None,
-			interpolate: None,
-			invariant: false,
+			arg: ir::ArgAttribs {
+				builtin: None,
+				location: None,
+				interpolate: None,
+				invariant: false,
+			},
 			size: None,
 		};
 
@@ -441,35 +443,35 @@ impl<'a> Resolver<'a> {
 					}
 				},
 				AttributeType::Builtin(b) => {
-					if attribs.builtin.is_some() {
+					if attribs.arg.builtin.is_some() {
 						self.diagnostics
 							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
 					} else {
-						attribs.builtin = Some(b);
+						attribs.arg.builtin = Some(b);
 					}
 				},
 				AttributeType::Location(loc) => {
-					if attribs.location.is_some() {
+					if attribs.arg.location.is_some() {
 						self.diagnostics
 							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
 					} else {
-						attribs.location = Some(self.expr(loc));
+						attribs.arg.location = Some(self.expr(loc));
 					}
 				},
 				AttributeType::Interpolate(i, s) => {
-					if attribs.interpolate.is_some() {
+					if attribs.arg.interpolate.is_some() {
 						self.diagnostics
 							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
 					} else {
-						attribs.interpolate = Some((i, s));
+						attribs.arg.interpolate = Some((i, s));
 					}
 				},
 				AttributeType::Invariant => {
-					if attribs.invariant {
+					if attribs.arg.invariant {
 						self.diagnostics
 							.push(attrib.span.error("duplicate attribute") + attrib.span.marker());
 					} else {
-						attribs.invariant = true;
+						attribs.arg.invariant = true;
 					}
 				},
 				AttributeType::Size(expr) => {
