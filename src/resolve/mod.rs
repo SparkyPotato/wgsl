@@ -35,9 +35,9 @@ use crate::{
 };
 
 mod cycle;
-mod features;
-mod inbuilt;
-mod inbuilt_functions;
+pub mod features;
+pub mod inbuilt;
+pub mod inbuilt_functions;
 mod index;
 pub mod ir;
 
