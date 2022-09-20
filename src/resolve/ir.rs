@@ -38,11 +38,14 @@ pub struct TranslationUnit {
 	pub features: EnabledFeatures,
 	pub decls: Vec<Decl>,
 	pub roots: Vec<DeclId>,
+	pub dependency_order: Vec<DeclId>,
 }
 
 impl TranslationUnit {
-	pub fn decls(&self) -> impl Iterator<Item = (DeclId, &Decl)> {
-		self.decls.iter().enumerate().map(|(i, d)| (DeclId(i as u32), d))
+	pub fn decls_ordered(&self) -> impl Iterator<Item = (DeclId, &Decl)> {
+		self.dependency_order
+			.iter()
+			.map(move |id| (*id, &self.decls[id.0 as usize]))
 	}
 
 	pub fn get(&self, id: DeclId) -> &Decl { &self.decls[id.0 as usize] }
@@ -54,6 +57,7 @@ impl TranslationUnit {
 			features,
 			decls: Vec::new(),
 			roots: Vec::new(),
+			dependency_order: Vec::new(),
 		}
 	}
 }

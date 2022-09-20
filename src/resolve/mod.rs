@@ -34,7 +34,7 @@ use crate::{
 	text::{Interner, Text},
 };
 
-mod cycle;
+mod dependency;
 pub mod features;
 pub mod inbuilt;
 pub mod inbuilt_functions;
@@ -84,7 +84,7 @@ pub fn resolve(tu: ast::TranslationUnit, intern: &mut Interner, diagnostics: &mu
 		resolver.decl(decl);
 	}
 
-	cycle::resolve_all_dependencies(&mut out, diagnostics);
+	dependency::resolve_all_dependencies(&mut out, diagnostics);
 
 	out
 }

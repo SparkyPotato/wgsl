@@ -28,6 +28,8 @@ pub fn resolve_all_dependencies(tu: &mut TranslationUnit, diagnostics: &mut Diag
 	let mut visited = vec![false; tu.decls.len()];
 	let mut temp_visited = vec![false; tu.decls.len()];
 
+	let mut depdendency_order = Vec::with_capacity(tu.decls.len());
+
 	for &decl in tu.roots.iter() {
 		recursive_solve(
 			decl,
@@ -35,6 +37,7 @@ pub fn resolve_all_dependencies(tu: &mut TranslationUnit, diagnostics: &mut Diag
 			&mut tu.decls,
 			&mut visited,
 			&mut temp_visited,
+			&mut depdendency_order,
 			diagnostics,
 		);
 	}
@@ -45,11 +48,13 @@ pub fn resolve_all_dependencies(tu: &mut TranslationUnit, diagnostics: &mut Diag
 			diagnostics.push(span.warning("unused declaration") + span.marker());
 		}
 	}
+
+	tu.dependency_order = depdendency_order;
 }
 
 fn recursive_solve(
 	id: DeclId, ctx: StackList<(DeclId, Span)>, decls: &mut [Decl], visited: &mut [bool], temp_visited: &mut [bool],
-	diagnostics: &mut Diagnostics,
+	dep_order: &mut Vec<DeclId>, diagnostics: &mut Diagnostics,
 ) {
 	if visited[id.0 as usize] {
 		return;
@@ -91,9 +96,18 @@ fn recursive_solve(
 		})
 		.collect();
 	for &(decl, span) in dec.iter() {
-		recursive_solve(decl, ctx.with((id, span)), decls, visited, temp_visited, diagnostics);
+		recursive_solve(
+			decl,
+			ctx.with((id, span)),
+			decls,
+			visited,
+			temp_visited,
+			dep_order,
+			diagnostics,
+		);
 	}
 
+	dep_order.push(id);
 	let deps: Vec<_> = dec
 		.iter()
 		.flat_map(|&id| decls[id.0 .0 as usize].dependencies.iter().copied())
