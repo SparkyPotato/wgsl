@@ -149,7 +149,7 @@ impl Parser<'_> {
 		block.define(
 			stmt.repeated()
 				.delimited_by(just(TokenKind::LBrace), just(TokenKind::RBrace))
-				.map(|stmts| Block { stmts }),
+				.map_with_span(|stmts, span| Block { stmts, span }),
 		);
 
 		let ty = recursive(|ty: Recursive<_, Type, _>| {

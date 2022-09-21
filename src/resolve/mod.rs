@@ -624,7 +624,10 @@ impl<'a> Resolver<'a> {
 			}
 		}
 
-		ir::Block { stmts }
+		ir::Block {
+			stmts,
+			span: block.span,
+		}
 	}
 
 	fn stmt(&mut self, stmt: ast::Stmt) -> Option<ir::Stmt> {

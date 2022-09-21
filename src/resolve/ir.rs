@@ -262,6 +262,7 @@ pub enum InbuiltType {
 #[derive(Clone, Debug)]
 pub struct Block {
 	pub stmts: Vec<Stmt>,
+	pub span: Span,
 }
 
 #[derive(Clone, Debug)]
