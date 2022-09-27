@@ -42,11 +42,20 @@ pub fn resolve_all_dependencies(tu: &mut TranslationUnit, diagnostics: &mut Diag
 		);
 	}
 
-	for (id, visited) in visited.into_iter().enumerate() {
-		if !visited {
+	for id in 0..tu.decls.len() {
+		let visit = visited[id];
+		if !visit {
 			let span = decl_ident_span(&tu.decls[id]);
 			diagnostics.push(span.warning("unused declaration") + span.marker());
-			tu.dependency_order.push(DeclId(id as _));
+			recursive_solve(
+				DeclId(id as _),
+				StackList::empty(),
+				&mut tu.decls,
+				&mut visited,
+				&mut temp_visited,
+				&mut depdendency_order,
+				diagnostics,
+			);
 		}
 	}
 
