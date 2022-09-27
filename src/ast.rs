@@ -232,7 +232,6 @@ pub struct UnaryExpr {
 #[derive(Copy, Clone, Debug)]
 pub enum UnaryOp {
 	Ref,
-	RefRef,
 	Not,
 	Minus,
 	Deref,

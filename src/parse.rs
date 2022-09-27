@@ -327,7 +327,6 @@ impl Parser<'_> {
 
 		let unary = select! {
 			TokenKind::And => UnaryOp::Ref,
-			TokenKind::AndAnd => UnaryOp::RefRef,
 			TokenKind::Bang => UnaryOp::Not,
 			TokenKind::Minus => UnaryOp::Minus,
 			TokenKind::Star => UnaryOp::Deref,
