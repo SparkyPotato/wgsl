@@ -46,6 +46,7 @@ pub fn resolve_all_dependencies(tu: &mut TranslationUnit, diagnostics: &mut Diag
 		if !visited {
 			let span = decl_ident_span(&tu.decls[id]);
 			diagnostics.push(span.warning("unused declaration") + span.marker());
+			tu.dependency_order.push(DeclId(id as _));
 		}
 	}
 
